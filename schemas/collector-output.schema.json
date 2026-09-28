@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext collector result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "claim", "kind", "scope", "target", "evidence_status", "evidence_refs", "existing_claim", "conflicts_with"],
+  "properties": {
+    "action": {"type": "string", "enum": ["propose", "skip"]},
+    "claim": {"type": "string"},
+    "api_symbol": {"type": ["string", "null"]},
+    "kind": {"type": "string", "enum": ["api", "behavior", "compatibility", "recipe", "negative-evidence", "runtime-result", "other"]},
+    "scope": {"type": "string", "enum": ["project", "target", "global"]},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "client": {"type": ["string", "null"]},
+        "platform": {"type": ["string", "null"]},
+        "client_version": {"type": ["string", "null"]},
+        "sdk_version": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "plugin_format": {"type": ["string", "null"]}
+      }
+    },
+    "evidence_status": {"type": "string", "enum": ["runtime-verified", "code", "docs", "inference", "secondary", "unavailable"]},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "existing_claim": {"type": ["string", "null"]},
+    "conflicts_with": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": ["string", "null"]}
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@exteracontext/mcp",
+  "version": "0.6.1",
+  "private": true,
+  "type": "module",
+  "description": "MCP 2026-07-28 server for ExteraContext",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check src/bridge.mjs && node --check src/server.mjs && node --check src/index.mjs && node --check test/mcp-contract.test.mjs && node --check test/bridge.test.mjs && node --check test/sdk-integration.test.mjs",
+    "start": "node src/index.mjs --transport stdio",
+    "start:stdio": "node src/index.mjs --transport stdio",
+    "start:http": "node src/index.mjs --transport http",
+    "test": "node --test test/*.test.mjs",
+    "test:offline": "node --test test/mcp-contract.test.mjs test/bridge.test.mjs",
+    "test:wire": "node --test test/sdk-integration.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.1.0",
+    "@modelcontextprotocol/node": "2.1.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.1.0"
+  }
+}

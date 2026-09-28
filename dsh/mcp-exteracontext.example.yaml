@@ -1,0 +1,17 @@
+# Project-local example: <project>/.dsh/cordis.patch.yml
+# Replace /ABS/PATH/TO/exteracontext with the extracted bundle root.
+- insert:
+    - id: mcp-exteracontext
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: exteracontext
+        transport: stdio
+        command: node
+        args:
+          - mcp/src/index.mjs
+          - --transport
+          - stdio
+          - --modern-only
+        cwd: /ABS/PATH/TO/exteracontext
+        toolCallTimeoutMs: 60000
+        failOnStartupError: true

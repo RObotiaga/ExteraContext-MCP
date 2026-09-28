@@ -1,0 +1,14 @@
+[
+  {"id":"clipboard-log","query":"залогировать сложный Java объект через inspector и скопировать строку в clipboard с bulletin","expected":["official-sdk:android-log-clipboard"]},
+  {"id":"preinstalled-python","query":"какие Python библиотеки уже предустановлены requests pillow yaml lxml beautifulsoup","expected":["official-sdk:preinstalled-libs"]},
+  {"id":"java-subclass","query":"создать Java subclass из Python через DexMaker реализовать interface override method field constructor","expected":["official-sdk:class-proxy-dsl"]},
+  {"id":"java-peer","query":"создать instance Java proxy получить исходный java object и обернуть существующий Java object обратно в Python peer","expected":["official-sdk:class-proxy-instance"]},
+  {"id":"devserver","query":"локальный dev server плагинов 127.0.0.1 порт 42690 install enable disable reload delete","expected":["official-sdk:devserver-security"]},
+  {"id":"settings-types","query":"какие встроенные типы строк настроек Header Divider Switch Selector Input Text EditText Custom","expected":["official-sdk:settings-row-types"]},
+  {"id":"elyx-settings","query":"сохраняются ли настройки Elyx после reload update и использует ли SettingsController storage BasePlugin","expected":["official-sdk:elyx-settings"]},
+  {"id":"elyx-locales","query":"fallback локализации Elyx English затем ключ и plural формы one few many","expected":["official-sdk:elyx-localization"]},
+  {"id":"elyxbuilder-watch","query":"что делает elyb watch устанавливает ли собранный Elyx архив на устройство и какие версии Python нужны для compile pyc","expected":["official-sdk:elyxbuilder-cli"]},
+  {"id":"telegram-class-index","query":"где искать классы Telegram LaunchActivity ChatActivity MessageObject SendMessagesHelper TLRPC это API wrapper или справочник исходников","expected":["official-sdk:common-telegram-classes-index"]},
+  {"id":"queue-names","query":"какие именованные DispatchQueue доступны STAGE GLOBAL SEARCH THEME PLUGINS EXTERNAL_NETWORK","expected":["official-sdk:queue-names"]},
+  {"id":"sdk-skew","query":"какая минимальная версия SDK нужна для multi account и почему baseline документации отличается от Elyx примеров","expected":["official-sdk:version-doc-skew","official-sdk:sdk-baseline"]}
+]

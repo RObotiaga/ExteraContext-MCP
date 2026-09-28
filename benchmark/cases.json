@@ -1,0 +1,17 @@
+[
+  {"id":"outgoing-text","query":"перехватить исходящее сообщение до отправки и безопасно изменить текст","expected":["official-sdk:outgoing-hook","official-sdk:hook-registration","official-sdk:hook-strategies"]},
+  {"id":"multi-account","query":"обработать update от правильного аккаунта даже если в интерфейсе выбран другой аккаунт","expected":["official-sdk:account-scope","official-sdk:account-client"]},
+  {"id":"background-ui","query":"выполнить сетевой запрос в фоне а потом обновить Android UI","expected":["official-sdk:queue-api","official-sdk:ui-thread"]},
+  {"id":"tl-request","query":"отправить TLObject запрос Telegram API и обработать response error для конкретного аккаунта","expected":["official-sdk:send-request","official-sdk:account-client"]},
+  {"id":"edit-message","query":"изменить текст и файл медиа уже существующего сообщения MessageObject","expected":["official-sdk:edit-message"]},
+  {"id":"reflection-private","query":"найти Java класс через reflection и прочитать приватное поле объекта","expected":["official-sdk:java-reflection-find","official-sdk:private-fields"]},
+  {"id":"xposed-replacement","query":"полностью заменить Java метод через Xposed и вернуть совместимое значение","expected":["official-sdk:xposed-hooks","official-sdk:xposed-param"]},
+  {"id":"custom-settings","query":"добавить собственную строку настроек с custom View click и long click","expected":["official-sdk:custom-settings-factory","official-sdk:settings-row-types"]},
+  {"id":"lifecycle-cleanup","query":"зарегистрировать hooks при загрузке и корректно очистить listeners workers при выгрузке reload","expected":["official-sdk:lifecycle","official-sdk:hook-registration"]},
+  {"id":"elyx-archive","query":"как правильно упаковать Elyx архив где должен лежать refmap yml без внешней папки","expected":["official-sdk:elyx-archive"]},
+  {"id":"elyx-import","query":"динамически импортировать локальный модуль внутри Elyx плагина с изоляцией между плагинами","expected":["official-sdk:elyx-imports"]},
+  {"id":"file-handler","query":"зарегистрировать обработчик расширения файла и потом снять регистрацию","expected":["official-sdk:file-controller"]},
+  {"id":"intents","query":"перехватить Android Intent до и после обработки с фильтром path query args","expected":["official-sdk:intents","official-sdk:intents-query-name"]},
+  {"id":"metadata","query":"какие обязательные metadata у single file плагина и какие ограничения на plugin id","expected":["official-sdk:metadata-ast","official-sdk:plugin-id-single"]},
+  {"id":"permissions-negative","query":"какой API SDK нужно вызвать чтобы запросить или выдать permission плагину","expected":["official-sdk:permissions-undocumented"]}
+]

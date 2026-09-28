@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext verifier phase B",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "final_statement", "existing_subject_type", "existing_subject_id", "notes"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["accept", "accept-with-changes", "attach-evidence", "conflict", "reject", "needs-runtime"]},
+    "final_statement": {"type": ["string", "null"]},
+    "existing_subject_type": {"type": ["string", "null"], "enum": ["claim", "legacy_fact", null]},
+    "existing_subject_id": {"type": ["string", "null"]},
+    "notes": {"type": ["string", "null"]}
+  }
+}

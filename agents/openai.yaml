@@ -1,0 +1,3 @@
+interface:
+  display_name: "ExteraContext"
+  short_description: "Verified context for ExteraGram plugin development"

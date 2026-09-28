@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext blind verifier phase A",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["statement", "scope", "evidence_status", "uncertainty"],
+  "properties": {
+    "statement": {"type": "string", "minLength": 1},
+    "scope": {"type": "object", "additionalProperties": true},
+    "evidence_status": {"type": "string", "enum": ["runtime-verified", "code", "docs", "inference", "secondary", "unavailable"]},
+    "uncertainty": {"type": ["string", "null"]},
+    "conflicts_seen": {"type": "array", "items": {"type": "string"}}
+  }
+}

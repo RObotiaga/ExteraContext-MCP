@@ -1,0 +1,8 @@
+[
+  {"id":"nagram-observers","query":"использовать ObserversGroup removeAllObservers для групповой отписки NotificationCenter","expected_prefix":"nagram:","symbol":"ObserversGroup"},
+  {"id":"ayu-ghost","query":"реализовать AyuConfig toggleGhostMode и определить isGhostModeActive","expected_prefix":"ayugram4a:","symbol":"AyuConfig"},
+  {"id":"neko-storage","query":"использовать CloudStorageHelper invokeWebViewCustomMethod для account scoped cloud storage","expected_prefix":"nekogram:","symbol":"CloudStorageHelper"},
+  {"id":"nia-translation","query":"использовать TranslationCache get put для кеширования LLM translation","expected_prefix":"niagramx:","symbol":"TranslationCache"},
+  {"id":"nagram-networklog","query":"использовать NetworkLoggingInterceptor executeWithLogging и сохранять network logs","expected_prefix":"nagram:","symbol":"NetworkLoggingInterceptor"},
+  {"id":"ayu-filter-cache","query":"использовать AyuFilter rebuildCache isFiltered для regex фильтра сообщений","expected_prefix":"ayugram4a:","symbol":"AyuFilter"}
+]

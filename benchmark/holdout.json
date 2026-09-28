@@ -1,0 +1,14 @@
+[
+  {"id":"app-events","query":"приостанавливать работу плагина когда приложение уходит в background и возобновлять при возвращении","expected":["official-sdk:app-events"]},
+  {"id":"long-click","query":"создать Java OnLongClickListener из Python callback который должен вернуть bool","expected":["official-sdk:android-listeners"]},
+  {"id":"bulletin","query":"показать success bulletin или сообщение с кнопкой из плагина","expected":["official-sdk:bulletins"]},
+  {"id":"dialog","query":"показать AlertDialog со списком элементов и callback кнопки в UI thread","expected":["official-sdk:dialogs","official-sdk:ui-thread"]},
+  {"id":"send-media","query":"отправить фото документ видео или аудио с Markdown parse mode","expected":["official-sdk:send-helpers"]},
+  {"id":"low-send","query":"отправить сообщение через низкоуровневые параметры peer replyToMsg scheduleDate notify","expected":["official-sdk:low-level-send"]},
+  {"id":"formatting","query":"преобразовать HTML или Markdown текст в Telegram MessageEntity включая spoiler quote custom emoji","expected":["official-sdk:text-formatting"]},
+  {"id":"file-io","query":"получить каталог документов плагина записать bytes в файл потом удалить файл","expected":["official-sdk:file-io"]},
+  {"id":"settings-storage","query":"сохранить настройку плагина экспортировать и импортировать settings и перестроить страницу","expected":["official-sdk:settings-storage"]},
+  {"id":"elyx-assets","query":"прочитать asset Elyx как bytes json yaml и преобразовать изображение в drawable","expected":["official-sdk:elyx-assets"]},
+  {"id":"elyx-requirements","query":"установить Python зависимость в Elyx которая содержит native extension wheel","expected":["official-sdk:elyx-requirements"]},
+  {"id":"elyx-reload","query":"live reload Elyx после изменения файлов выгрузить очистить imported modules и загрузить снова","expected":["official-sdk:elyx-dev-reload"]}
+]
