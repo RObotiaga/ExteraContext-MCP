@@ -41,3 +41,18 @@ python benchmark/agent-v1/aggregate.py path/to/benchmark-results
 ```
 
 The primary metric is Clean Task Success Rate. Treat missing structured output as a failed structured run rather than silently dropping it.
+
+
+## Self-contained run packets
+
+`prepare_run.py` now creates an isolated `target/` project. Open that exact directory in a fresh DSH session; no external target fixture is required.
+
+Example:
+
+```bash
+python benchmark/agent-v1/prepare_run.py v1-001 ./run-v1-001
+```
+
+Then open `./run-v1-001/target` in DSH and follow `BENCHMARK_MODE.md` + `BENCHMARK_TASK.md`.
+
+Mode B still requires read-only access to the separately frozen Knowledge checkout, and mode C requires the MCP connection. These are benchmark resources, not part of the target fixture.
