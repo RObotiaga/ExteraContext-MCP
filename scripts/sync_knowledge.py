@@ -40,7 +40,7 @@ def main() -> int:
     args.db.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="exteracontext-knowledge-") as td:
         checkout = Path(td) / "knowledge"
-        subprocess.run(["git", "clone", "-q", "--no-checkout", args.repo, str(checkout)], check=True)
+        subprocess.run(["git", "clone", "-q", "--no-checkout", args.repo, str(checkout)], check=True, cwd=td)
         subprocess.run(["git", "-C", str(checkout), "checkout", "-q", "--detach", args.ref], check=True)
 
         build = checkout / "scripts" / "build_index.py"
