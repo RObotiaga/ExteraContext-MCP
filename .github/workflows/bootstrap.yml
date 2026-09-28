@@ -3,7 +3,7 @@ name: Bootstrap repository contents
 on:
   push:
     paths:
-      - 'bootstrap/source.tar.xz'
+      - 'bootstrap/READY'
 
 permissions:
   contents: write
@@ -17,6 +17,7 @@ jobs:
           fetch-depth: 0
       - name: Unpack source tree
         run: |
+          cat bootstrap/part-* | base64 -d > bootstrap/source.tar.xz
           tar -xJf bootstrap/source.tar.xz --strip-components=1
           rm -rf bootstrap
           rm -f .github/workflows/bootstrap.yml
