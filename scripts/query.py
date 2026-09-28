@@ -107,20 +107,51 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="strict")
 
 
+def _desired_knowledge_ref() -> str:
+    explicit = os.environ.get("EXTERACONTEXT_KNOWLEDGE_REF")
+    if explicit:
+        return explicit.strip()
+    lock = SKILL_ROOT / "KNOWLEDGE_LOCK"
+    if lock.exists():
+        value = lock.read_text("utf-8").strip()
+        if value:
+            return value
+    return "main"
+
+
+def _knowledge_stamp_matches() -> bool:
+    stamp = DB.parent / ".knowledge-ref"
+    if not stamp.exists():
+        return False
+    return stamp.read_text("utf-8").strip() == _desired_knowledge_ref()
+
+
 def ensure_db() -> None:
-    if DB.exists():
-        return
+    auto_sync = os.environ.get("EXTERACONTEXT_AUTO_SYNC", "").lower() in {"1", "true", "yes", "on"}
+
+    # Monolithic/development checkout compatibility.
     build = SKILL_ROOT / "scripts" / "build_index.py"
     if build.exists() and WIKI.exists():
-        subprocess.run([sys.executable, str(build), "--wiki", str(WIKI), "--db", str(DB)], check=True, stdout=subprocess.DEVNULL)
+        if not DB.exists():
+            subprocess.run([sys.executable, str(build), "--wiki", str(WIKI), "--db", str(DB)], check=True, stdout=subprocess.DEVNULL)
         return
-    if os.environ.get("EXTERACONTEXT_AUTO_SYNC", "").lower() in {"1", "true", "yes", "on"}:
+
+    # Split-repository mode: refresh only when the pinned Knowledge commit changed.
+    if auto_sync and (not DB.exists() or not _knowledge_stamp_matches()):
         sync = SKILL_ROOT / "scripts" / "sync_knowledge.py"
-        subprocess.run([sys.executable, str(sync), "--db", str(DB)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [sys.executable, str(sync), "--ref", _desired_knowledge_ref(), "--db", str(DB)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
         return
+
+    if DB.exists():
+        return
+
     raise FileNotFoundError(
         f"ExteraContext base database not found at {DB}. "
-        "Run `python scripts/sync_knowledge.py` or set EXTERACONTEXT_DB."
+        "Run `python scripts/sync_knowledge.py` or set EXTERACONTEXT_AUTO_SYNC=1."
     )
 
 
