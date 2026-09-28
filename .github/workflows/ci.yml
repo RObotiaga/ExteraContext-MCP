@@ -29,6 +29,7 @@ jobs:
           python tests/test_skill_contract.py
           python tests/test_knowledge_writeback.py
           python tests/test_orchestrator.py
+          python benchmark/agent-v1/validate.py
       - name: Install MCP SDK
         working-directory: mcp
         run: npm install --no-audit --no-fund
