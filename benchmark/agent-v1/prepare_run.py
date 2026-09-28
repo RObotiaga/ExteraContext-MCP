@@ -7,8 +7,9 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+FIXTURE = ROOT / "fixture-template"
 
-p = argparse.ArgumentParser(description="Prepare one public ExteraContext agent-benchmark run packet")
+p = argparse.ArgumentParser(description="Prepare one isolated ExteraContext agent-benchmark run packet")
 p.add_argument("run_id")
 p.add_argument("output", type=Path)
 args = p.parse_args()
@@ -25,10 +26,15 @@ if out.exists():
     shutil.rmtree(out)
 out.mkdir(parents=True)
 
+target = out / "target"
+shutil.copytree(FIXTURE, target)
+
 (out / "RUN.json").write_text(json.dumps(run, ensure_ascii=False, indent=2) + "\n", "utf-8")
 (out / "TASK.json").write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", "utf-8")
-(out / "MODE.md").write_text((ROOT / "prompts" / f"MODE_{run['mode']}.md").read_text("utf-8"), "utf-8")
-shutil.copy2(ROOT / "result.schema.json", out / "result.schema.json")
+
+mode_text = (ROOT / "prompts" / f"MODE_{run['mode']}.md").read_text("utf-8")
+(target / "BENCHMARK_MODE.md").write_text(mode_text, "utf-8")
+shutil.copy2(ROOT / "result.schema.json", target / "result.schema.json")
 
 task_md = f"""# Benchmark task {task['id']}
 
@@ -48,12 +54,34 @@ Run metadata:
 - mode: {run['mode']}
 - repeat: {run['repeat']}
 
-Read MODE.md for the mode constraints. Complete the task in the supplied target project/fixture and create BENCHMARK_RESULT.json matching result.schema.json.
+Work only inside this target project unless BENCHMARK_MODE.md explicitly permits an external resource.
+
+Create BENCHMARK_RESULT.json in this directory and make it match result.schema.json.
 """
-(out / "TASK.md").write_text(task_md, "utf-8")
+(target / "BENCHMARK_TASK.md").write_text(task_md, "utf-8")
 
-for forbidden in ["ground-truth.json", "assessment.schema.json"]:
-    if (out / forbidden).exists():
-        raise AssertionError(f"private evaluator file leaked: {forbidden}")
+launch = f"""# Launch this run
 
-print(out)
+Open the following directory as a **new, clean DSH session/project**:
+
+`{target.resolve()}`
+
+Then instruct the agent:
+
+> Read BENCHMARK_MODE.md and BENCHMARK_TASK.md, perform the benchmark task, and create BENCHMARK_RESULT.json.
+
+Mode: {run['mode']}
+Task: {run['task_id']}
+Repeat: {run['repeat']}
+
+For mode B, separately provide read-only access to the frozen ExteraContext-Knowledge checkout specified by the benchmark protocol.
+For mode C, enable the frozen ExteraContext MCP configuration and do not expose the raw Knowledge checkout.
+"""
+(out / "OPEN_IN_DSH.md").write_text(launch, "utf-8")
+
+private_names = {"ground-truth.json", "assessment.schema.json", "EVALUATOR.md"}
+for pth in out.rglob("*"):
+    if pth.name in private_names:
+        raise AssertionError(f"private evaluator file leaked into run packet: {pth}")
+
+print(target)
