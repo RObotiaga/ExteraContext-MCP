@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext Agent Benchmark Result",
+  "type": "object",
+  "required": [
+    "benchmark",
+    "task_id",
+    "mode",
+    "repeat",
+    "completed",
+    "summary",
+    "external_symbols",
+    "uncertainties",
+    "files_changed",
+    "tests"
+  ],
+  "properties": {
+    "benchmark": {
+      "const": "exteracontext-agent-v1"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "repeat": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "completed": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "external_symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "status"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "target-supported",
+              "donor-only",
+              "unknown",
+              "version-uncertain",
+              "runtime-verified"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pass",
+              "fail",
+              "not-run"
+            ]
+          },
+          "details": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tool_calls": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "input_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "output_tokens": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "wall_time_seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "repair_iterations": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}
