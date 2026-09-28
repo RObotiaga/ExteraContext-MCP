@@ -12,12 +12,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "exteracontext.sqlite"
 DEFAULT_REPO = "https://github.com/RObotiaga/ExteraContext-Knowledge.git"
+LOCK_FILE = ROOT / "KNOWLEDGE_LOCK"
+STAMP_FILE = ROOT / "data" / ".knowledge-ref"
+
+
+def default_ref() -> str:
+    explicit = os.environ.get("EXTERACONTEXT_KNOWLEDGE_REF")
+    if explicit:
+        return explicit.strip()
+    if LOCK_FILE.exists():
+        value = LOCK_FILE.read_text("utf-8").strip()
+        if value:
+            return value
+    return "main"
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Build the ExteraContext base DB from ExteraContext-Knowledge")
     p.add_argument("--repo", default=os.environ.get("EXTERACONTEXT_KNOWLEDGE_REPO", DEFAULT_REPO))
-    p.add_argument("--ref", default=os.environ.get("EXTERACONTEXT_KNOWLEDGE_REF", "main"))
+    p.add_argument("--ref", default=default_ref())
     p.add_argument("--db", type=Path, default=Path(os.environ.get("EXTERACONTEXT_DB", DEFAULT_DB)))
     args = p.parse_args()
 
@@ -27,10 +40,12 @@ def main() -> int:
     args.db.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="exteracontext-knowledge-") as td:
         checkout = Path(td) / "knowledge"
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", args.ref, args.repo, str(checkout)],
-            check=True,
-        )
+        checkout.mkdir()
+        subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+        subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", args.repo], check=True)
+        subprocess.run(["git", "-C", str(checkout), "fetch", "-q", "--depth", "1", "origin", args.ref], check=True)
+        subprocess.run(["git", "-C", str(checkout), "checkout", "-q", "--detach", "FETCH_HEAD"], check=True)
+
         build = checkout / "scripts" / "build_index.py"
         wiki = checkout / "data" / "wiki"
         provenance = checkout / "data" / "legacy-source-runs.json"
@@ -50,7 +65,9 @@ def main() -> int:
         )
         tmp_db.replace(args.db)
 
-    print(f"knowledge database ready: {args.db}")
+    stamp = args.db.parent / ".knowledge-ref"
+    stamp.write_text(args.ref.strip() + "\n", encoding="utf-8")
+    print(f"knowledge database ready: {args.db} @ {args.ref}")
     return 0
 
 
