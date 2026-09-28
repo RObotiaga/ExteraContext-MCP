@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext Agent Benchmark Assessment",
+  "type": "object",
+  "required": [
+    "task_id",
+    "mode",
+    "repeat",
+    "materially_completed",
+    "invented_api",
+    "donor_contamination",
+    "version_mismatch",
+    "constraints_handled",
+    "correct_unknown",
+    "clean_success"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "repeat": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "materially_completed": {
+      "type": "boolean"
+    },
+    "invented_api": {
+      "type": "boolean"
+    },
+    "donor_contamination": {
+      "type": "boolean"
+    },
+    "version_mismatch": {
+      "type": "boolean"
+    },
+    "constraints_handled": {
+      "type": "boolean"
+    },
+    "correct_unknown": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "unnecessary_low_level_fallback": {
+      "type": "boolean"
+    },
+    "static_success": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "load_success": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "runtime_success": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "evidence_boundary_correct": {
+      "type": "boolean"
+    },
+    "clean_success": {
+      "type": "boolean"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
