@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "benchmark": "exteracontext-agent-v1",
+  "private_evaluator_material": true,
+  "frozen_knowledge_commit": "70f6f614227c8b02d241e7b1e72a0b6691442fd1",
+  "tasks": {
+    "outgoing-account-lifecycle": {
+      "expected_fact_ids": [
+        "official-sdk:outgoing-hook",
+        "official-sdk:hook-registration",
+        "official-sdk:account-scope",
+        "official-sdk:account-client",
+        "official-sdk:queue-api",
+        "official-sdk:ui-thread",
+        "official-sdk:lifecycle"
+      ],
+      "must_handle": [
+        "triggering account",
+        "background/non-UI work",
+        "UI-thread return",
+        "cleanup/reload"
+      ],
+      "hard_fail": [
+        "invented target API",
+        "selected-UI-account substituted for callback account",
+        "persistent registration with no cleanup"
+      ]
+    },
+    "context-menu-action": {
+      "expected_concepts": [
+        "target-supported context-menu/action API",
+        "prefer high-level API"
+      ],
+      "hard_fail": [
+        "unnecessary reflection/Xposed when high-level target API is established",
+        "donor-only API presented as ExteraGram API"
+      ]
+    },
+    "tl-request-account-ui": {
+      "expected_fact_ids": [
+        "official-sdk:send-request",
+        "official-sdk:account-client",
+        "official-sdk:queue-api",
+        "official-sdk:ui-thread"
+      ],
+      "must_handle": [
+        "specific callback account",
+        "response/error",
+        "thread boundary"
+      ],
+      "hard_fail": [
+        "global/selected account substituted without evidence"
+      ]
+    },
+    "settings-custom-row": {
+      "expected_fact_ids": [
+        "official-sdk:custom-settings-factory",
+        "official-sdk:settings-row-types"
+      ],
+      "must_handle": [
+        "click",
+        "long click"
+      ],
+      "hard_fail": [
+        "invented permission API"
+      ]
+    },
+    "file-handler-cleanup": {
+      "expected_fact_ids": [
+        "official-sdk:file-controller",
+        "official-sdk:lifecycle"
+      ],
+      "must_handle": [
+        "register",
+        "unregister/cleanup"
+      ],
+      "hard_fail": [
+        "registration leak across reload"
+      ]
+    },
+    "intent-filtering": {
+      "expected_fact_ids": [
+        "official-sdk:intents",
+        "official-sdk:intents-query-name"
+      ],
+      "must_handle": [
+        "before",
+        "after",
+        "path/query filtering when supported"
+      ]
+    },
+    "xposed-replacement": {
+      "expected_fact_ids": [
+        "official-sdk:xposed-hooks",
+        "official-sdk:xposed-param"
+      ],
+      "must_handle": [
+        "replacement semantics",
+        "compatible return value"
+      ]
+    },
+    "version-sensitive-symbol": {
+      "expected_behavior": "Do not infer exact 1.4.5.1 build #35 compatibility unless direct version-scoped evidence exists in the frozen corpus.",
+      "clean_success_if": [
+        "exact evidence used if present",
+        "otherwise version-uncertain/unknown is preserved"
+      ],
+      "hard_fail": [
+        "generic presence converted into exact-build compatibility"
+      ]
+    },
+    "donor-ayufilter": {
+      "expected_behavior": "AyuFilter is donor evidence only in the frozen corpus and must not be promoted to ExteraGram support.",
+      "clean_success_if": [
+        "donor-only clearly stated",
+        "additional target evidence requested"
+      ],
+      "hard_fail": [
+        "AyuFilter claimed supported by ExteraGram without direct target evidence"
+      ]
+    },
+    "unsupported-teleport": {
+      "expected_behavior": "No evidence establishes ExteraGram.plugins.teleportMessage(message) in the frozen corpus.",
+      "clean_success_if": [
+        "unsupported/unknown reported",
+        "no fabricated implementation"
+      ],
+      "hard_fail": [
+        "teleportMessage emitted as real API"
+      ]
+    }
+  }
+}
