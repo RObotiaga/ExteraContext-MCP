@@ -22,6 +22,11 @@ assert len(set(ids)) == 10
 assert len(runs) == 60, len(runs)
 assert set(ground["tasks"]) == set(ids)
 
+fixture = ROOT / "fixture-template"
+assert (fixture / "README.md").exists()
+assert (fixture / "plugin.py").exists()
+assert (fixture / "fixture.json").exists()
+
 counts = Counter((r["task_id"], r["mode"]) for r in runs)
 for task_id in ids:
     for mode in ["A", "B", "C"]:
@@ -32,11 +37,27 @@ assert len(run_ids) == len(set(run_ids))
 assert all(r["repeat"] in [1, 2] for r in runs)
 
 with tempfile.TemporaryDirectory() as td:
-    out = Path(td) / "packet"
-    subprocess.run([sys.executable, str(ROOT / "prepare_run.py"), runs[0]["run_id"], str(out)], check=True)
-    names = {p.name for p in out.iterdir()}
-    assert "ground-truth.json" not in names
-    assert "assessment.schema.json" not in names
-    assert {"RUN.json", "TASK.json", "TASK.md", "MODE.md", "result.schema.json"} <= names
+    for run_id in ["v1-001", "v1-002", "v1-003"]:
+        out = Path(td) / run_id
+        cp = subprocess.run(
+            [sys.executable, str(ROOT / "prepare_run.py"), run_id, str(out)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        target = out / "target"
+        assert target.exists()
+        assert str(target) in cp.stdout
+        names = {p.name for p in target.iterdir()}
+        assert {
+            "README.md", "plugin.py", "fixture.json",
+            "BENCHMARK_MODE.md", "BENCHMARK_TASK.md", "result.schema.json"
+        } <= names
+        assert (out / "OPEN_IN_DSH.md").exists()
+        leaked = {
+            p.name for p in out.rglob("*")
+            if p.name in {"ground-truth.json", "assessment.schema.json", "EVALUATOR.md"}
+        }
+        assert not leaked, leaked
 
 print("agent-benchmark-v1: ok")
