@@ -1,0 +1,366 @@
+{
+  "schema_version": 1,
+  "benchmark": "exteracontext-agent-v1",
+  "runs": [
+    {
+      "run_id": "v1-001",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-002",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-003",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-004",
+      "task_id": "context-menu-action",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-005",
+      "task_id": "context-menu-action",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-006",
+      "task_id": "context-menu-action",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-007",
+      "task_id": "tl-request-account-ui",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-008",
+      "task_id": "tl-request-account-ui",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-009",
+      "task_id": "tl-request-account-ui",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-010",
+      "task_id": "settings-custom-row",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-011",
+      "task_id": "settings-custom-row",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-012",
+      "task_id": "settings-custom-row",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-013",
+      "task_id": "file-handler-cleanup",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-014",
+      "task_id": "file-handler-cleanup",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-015",
+      "task_id": "file-handler-cleanup",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-016",
+      "task_id": "intent-filtering",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-017",
+      "task_id": "intent-filtering",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-018",
+      "task_id": "intent-filtering",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-019",
+      "task_id": "xposed-replacement",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-020",
+      "task_id": "xposed-replacement",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-021",
+      "task_id": "xposed-replacement",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-022",
+      "task_id": "version-sensitive-symbol",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-023",
+      "task_id": "version-sensitive-symbol",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-024",
+      "task_id": "version-sensitive-symbol",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-025",
+      "task_id": "donor-ayufilter",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-026",
+      "task_id": "donor-ayufilter",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-027",
+      "task_id": "donor-ayufilter",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-028",
+      "task_id": "unsupported-teleport",
+      "mode": "A",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-029",
+      "task_id": "unsupported-teleport",
+      "mode": "B",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-030",
+      "task_id": "unsupported-teleport",
+      "mode": "C",
+      "repeat": 1
+    },
+    {
+      "run_id": "v1-031",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-032",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-033",
+      "task_id": "outgoing-account-lifecycle",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-034",
+      "task_id": "context-menu-action",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-035",
+      "task_id": "context-menu-action",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-036",
+      "task_id": "context-menu-action",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-037",
+      "task_id": "tl-request-account-ui",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-038",
+      "task_id": "tl-request-account-ui",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-039",
+      "task_id": "tl-request-account-ui",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-040",
+      "task_id": "settings-custom-row",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-041",
+      "task_id": "settings-custom-row",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-042",
+      "task_id": "settings-custom-row",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-043",
+      "task_id": "file-handler-cleanup",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-044",
+      "task_id": "file-handler-cleanup",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-045",
+      "task_id": "file-handler-cleanup",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-046",
+      "task_id": "intent-filtering",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-047",
+      "task_id": "intent-filtering",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-048",
+      "task_id": "intent-filtering",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-049",
+      "task_id": "xposed-replacement",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-050",
+      "task_id": "xposed-replacement",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-051",
+      "task_id": "xposed-replacement",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-052",
+      "task_id": "version-sensitive-symbol",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-053",
+      "task_id": "version-sensitive-symbol",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-054",
+      "task_id": "version-sensitive-symbol",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-055",
+      "task_id": "donor-ayufilter",
+      "mode": "A",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-056",
+      "task_id": "donor-ayufilter",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-057",
+      "task_id": "donor-ayufilter",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-058",
+      "task_id": "unsupported-teleport",
+      "mode": "B",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-059",
+      "task_id": "unsupported-teleport",
+      "mode": "C",
+      "repeat": 2
+    },
+    {
+      "run_id": "v1-060",
+      "task_id": "unsupported-teleport",
+      "mode": "A",
+      "repeat": 2
+    }
+  ]
+}
