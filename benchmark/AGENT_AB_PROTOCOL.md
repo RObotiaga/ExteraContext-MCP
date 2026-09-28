@@ -1,71 +1,162 @@
-# End-to-end agent A/B/C protocol
+# ExteraContext end-to-end agent A/B/C benchmark v1
 
-This is the second-stage benchmark. It requires an external agent runner (Codex CLI, Claude Code, or another model API) so each trial starts with a fresh context.
+This benchmark measures whether ExteraContext improves an agent's real ExteraGram/AyuGram plugin-development work. It is intentionally separate from retrieval Hit@K benchmarks and from MCP acceptance tests.
+
+## Frozen benchmark state
+
+- MCP repository: record the exact commit for every run.
+- Knowledge corpus: `70f6f614227c8b02d241e7b1e72a0b6691442fd1`.
+- ExteraContext MCP baseline: v0.6.1.
+- Use the same model, model build, reasoning level, target repository commit, tool permissions and time/token budget for all modes in one comparison.
+
+Do not silently update the Knowledge corpus in the middle of a benchmark series.
 
 ## Modes
 
 ### A — baseline
 
-Give the agent only the target plugin repository and the task prompt. Do not expose `data/wiki`, `scripts/query.py`, this skill, or previous answers.
+Give the agent only the target project/fixture and task prompt.
 
-### B — raw wiki
+Forbidden:
+- ExteraContext MCP;
+- ExteraContext Knowledge/wiki;
+- copied answers from other modes;
+- web search for ExteraGram/AyuGram API facts.
 
-Give the same repository and task plus read access to `data/wiki`. Do not expose `scripts/query.py` or the ExteraContext instructions. The agent may search/read the wiki manually.
+Normal local code inspection and ordinary language/runtime libraries are allowed.
 
-### C — ExteraContext
+### B — raw Knowledge
 
-Give the same repository and task with this skill installed. Keep the wiki behind the skill. Require the normal skill behavior: build a task packet and resolve every load-bearing non-local symbol.
+Give the same target project/fixture and task prompt plus read-only access to the frozen `ExteraContext-Knowledge` checkout.
+
+Forbidden:
+- ExteraContext MCP;
+- `scripts/query.py` or other MCP retrieval helpers;
+- answers from previous runs;
+- web search for ExteraGram/AyuGram API facts.
+
+The agent must search/read the Knowledge repository manually.
+
+### C — ExteraContext MCP
+
+Give the same target project/fixture and task prompt and the ExteraContext MCP connection.
+
+Forbidden:
+- direct access to the Knowledge checkout/database;
+- direct SQLite access;
+- copied answers from other runs;
+- web search for ExteraGram/AyuGram API facts.
+
+The agent should use MCP retrieval normally and preserve evidence boundaries.
 
 ## Isolation
 
-- New process/session for every task and every mode.
-- Same model/version/thinking setting.
-- Same target client and SDK version.
-- Same repository commit.
-- No answer from one run may be copied into another.
-- Randomize A/B/C ordering per task if the runner permits it.
+Every task/mode/repeat is a fresh process/session.
+
+- Same model/version/reasoning setting.
+- Same target repository/fixture commit.
+- Same task text.
+- Same target client/SDK metadata.
+- Same maximum wall time and token budget.
+- No continuation across modes.
+- No previous generated patch in the worktree.
+- Mutable ExteraContext knowledge must start from the same benchmark snapshot for every C run unless the task explicitly tests write-back.
+- Run order is defined by `agent-v1/run-manifest.json`; do not regroup all A, then all B, then all C.
+
+## Public vs private benchmark material
+
+Only copy these items into the agent workspace:
+
+- the target project/fixture;
+- the selected task text from `agent-v1/tasks.json`;
+- the mode-specific prompt;
+- the result schema.
+
+Do **not** expose `agent-v1/ground-truth.json` or evaluator notes to the tested agent.
+
+The benchmark operator/evaluator may use the private ground truth after the run.
+
+## Agent output contract
+
+Every run must create `BENCHMARK_RESULT.json` matching `agent-v1/result.schema.json`.
+
+The final implementation/answer must also remain in the target worktree so it can be inspected and, where possible, built or tested.
+
+A run that does not produce a parseable result file is still a run and is scored as a failure for structured-completion metrics.
+
+## Primary outcome
+
+The primary metric is **Clean Task Success Rate**.
+
+A run is clean-success only when all applicable conditions are true:
+
+1. The requested task is materially completed.
+2. No invented or unsupported target API is used as established fact.
+3. No donor-only API is presented as target-supported.
+4. No known target-version incompatibility is ignored.
+5. Required account/thread/lifecycle constraints are handled.
+6. For unknown/unsupported cases, the agent refuses to fabricate an implementation and states the evidence gap.
+
+This is intentionally stricter than "produced plausible code".
+
+## Secondary metrics
+
+Per mode report:
+
+- task completion rate;
+- clean task success rate;
+- unsupported/invented API rate;
+- donor contamination rate;
+- version mismatch rate;
+- correct-unknown rate;
+- static/build/load/runtime success when applicable;
+- repair iterations;
+- tool calls;
+- wall time;
+- input/output tokens when available;
+- evidence-boundary correctness;
+- unnecessary low-level fallback rate (reflection/Xposed when a supported higher-level API exists).
 
 ## Minimum suite
 
-Use 10 tasks x 3 modes x 2 repeats = 60 fresh runs. A stronger run is 30 x 3 x 3 = 270.
+v1 contains 10 tasks.
 
-Include ordinary public API tasks, lifecycle/reload, multi-account, threading, Java/Xposed, version-sensitive cases, donor traps, and unsupported/unknown cases.
+Run:
 
-## Automatic evidence checks
+`10 tasks × 3 modes × 2 repeats = 60 fresh runs`
 
-For every generated answer/code patch extract external symbols and classify them against the knowledge base:
+Do not tune ExteraContext against these 60 results and then report the same set as unbiased. After any benchmark-driven retrieval changes, create a new holdout set.
 
-- target-supported
-- donor-only
-- unknown
-- version-uncertain
-- runtime-verified (currently none)
+## Runtime tiers
 
-Do not count `code` or `docs` as runtime verification.
+When a compatible Android test environment is available:
 
-## Runtime checks
+1. **Static** — imports/symbols/signatures resolve.
+2. **Load** — plugin installs/enables without error.
+3. **Runtime** — requested behavior is actually triggered and asserted.
 
-When an Android test device is available, use build/load/runtime tiers:
+Lifecycle tasks should test enable → trigger → disable → trigger → enable → trigger → repeated reloads and ensure callbacks do not multiply.
 
-1. Static: imports/symbols/signatures resolve.
-2. Load: plugin installs/enables without error.
-3. Runtime: trigger the feature and assert behavior.
+Multi-account tasks should trigger equivalent events under at least two account IDs and verify that the callback account is preserved end-to-end.
 
-For lifecycle tests perform enable -> trigger -> disable -> trigger -> enable -> trigger -> reload x5 and ensure callbacks do not multiply.
+Static/docs evidence must never be relabeled runtime-verified merely because the agent produced code.
 
-For multi-account tests trigger equivalent events under at least two logged-in account IDs and assert that the callback account is preserved end to end.
+## Evaluation
 
-## Report
+Use `agent-v1/ground-truth.json` only from the evaluator context.
 
-Report per mode:
+For each run create an evaluator record matching `agent-v1/assessment.schema.json`. Then aggregate all records with:
 
-- working-task rate
-- unverified API rate
-- donor-only API rate
-- version mismatch rate
-- load failure rate
-- runtime failure rate
-- correct-unknown rate
-- median repair iterations
-- median tool calls
-- input/output tokens if the runner exposes them
+```bash
+python benchmark/agent-v1/aggregate.py benchmark-results/
+```
+
+The evaluator should inspect the actual patch/answer, not only trust the agent's self-reported `BENCHMARK_RESULT.json`.
+
+## Interpretation
+
+The benchmark answers:
+
+> Does ExteraContext MCP improve reliable plugin-development outcomes compared with no knowledge system and with the same raw knowledge exposed directly?
+
+It does not by itself prove runtime correctness of the underlying ExteraGram APIs. That still requires device/runtime evidence.
