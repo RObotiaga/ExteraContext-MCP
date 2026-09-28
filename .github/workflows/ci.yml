@@ -22,7 +22,22 @@ jobs:
         with:
           node-version: "22"
       - name: Build pinned Knowledge database
-        run: python scripts/sync_knowledge.py
+        id: sync
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/sync_knowledge.py > sync.log 2>&1 || echo $? > sync.exit
+          cat sync.log
+      - name: Upload sync diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-diagnostics
+          path: sync.log
+      - name: Fail if Knowledge sync failed
+        if: steps.sync.outcome == 'failure' || hashFiles('sync.exit') != ''
+        run: exit 1
       - name: Python regression suite
         run: |
           python tests/smoke.py
