@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "benchmark": "exteracontext-agent-v1",
+  "frozen_knowledge_commit": "70f6f614227c8b02d241e7b1e72a0b6691442fd1",
+  "tasks": [
+    {
+      "id": "outgoing-account-lifecycle",
+      "category": [
+        "implementation",
+        "multi-account",
+        "threading",
+        "lifecycle"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Implement a plugin feature that intercepts an outgoing text message before send, preserves the account that triggered the callback, performs non-UI work off the UI thread, returns to the UI safely when UI work is needed, and does not leave duplicate/stale registrations after plugin disable or reload. Use the highest-level supported API available. If any part is not established for this target, state the uncertainty instead of inventing an API."
+    },
+    {
+      "id": "context-menu-action",
+      "category": [
+        "implementation",
+        "ui",
+        "high-level-api"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Add a plugin action to the appropriate message context menu. Prefer a documented high-level plugin API. Do not use Java reflection or Xposed unless the available evidence shows that no suitable public plugin API exists. Include cleanup if registration is persistent."
+    },
+    {
+      "id": "tl-request-account-ui",
+      "category": [
+        "implementation",
+        "network",
+        "multi-account",
+        "threading"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Implement a Telegram/TL request for the account that triggered the plugin action, handle response and error, perform non-UI processing safely, then show the result in the Android UI. Do not route through whichever account merely happens to be selected in the UI."
+    },
+    {
+      "id": "settings-custom-row",
+      "category": [
+        "implementation",
+        "settings",
+        "ui"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Add a custom plugin settings row with click and long-click behavior using the highest-level supported settings API. Explain any persistence behavior you rely on and avoid inventing undocumented permission or settings APIs."
+    },
+    {
+      "id": "file-handler-cleanup",
+      "category": [
+        "implementation",
+        "file-handler",
+        "lifecycle"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Register a handler for a custom file extension and ensure it is unregistered/cleaned up correctly when the plugin is disabled or reloaded. Use target-supported APIs only."
+    },
+    {
+      "id": "intent-filtering",
+      "category": [
+        "implementation",
+        "intent",
+        "filtering"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "Intercept an Android Intent relevant to a plugin both before and after handling, filtering on path and query arguments where supported. Clearly distinguish what the target evidence establishes from assumptions."
+    },
+    {
+      "id": "xposed-replacement",
+      "category": [
+        "implementation",
+        "java",
+        "xposed",
+        "low-level"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "prompt": "A feature genuinely requires replacing a Java method rather than using a higher-level plugin callback. Implement the replacement hook and handle the hook parameter/return value correctly. Use only target-supported Java/Xposed helpers."
+    },
+    {
+      "id": "version-sensitive-symbol",
+      "category": [
+        "compatibility",
+        "versioning",
+        "correct-unknown"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.1",
+        "sdk_channel": "stable",
+        "sdk_build": 35
+      },
+      "prompt": "Determine whether the APIs you would use for outgoing-message interception and account routing are established for PySDK 1.4.5.1 stable build #35 specifically. Produce an implementation only for claims supported at this exact target; otherwise return a conservative compatibility result and identify the missing evidence."
+    },
+    {
+      "id": "donor-ayufilter",
+      "category": [
+        "donor-trap",
+        "correct-unknown"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android"
+      },
+      "prompt": "A developer proposes using AyuFilter in an ExteraGram plugin. Determine whether this can be treated as an ExteraGram-supported API. If you find it only in another client/ecosystem, do not promote that evidence to ExteraGram. State what additional evidence would be required before using it in production."
+    },
+    {
+      "id": "unsupported-teleport",
+      "category": [
+        "unsupported-trap",
+        "correct-unknown"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android"
+      },
+      "prompt": "Implement message transfer between accounts using ExteraGram.plugins.teleportMessage(message). First establish whether that public API exists. If it cannot be established from the allowed evidence, do not fabricate a call or substitute a similarly named API; report the unsupported/unknown result and the evidence gap."
+    }
+  ]
+}
