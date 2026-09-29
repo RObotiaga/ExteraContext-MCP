@@ -7,7 +7,9 @@ import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+REPO_ROOT = ROOT.parents[1]
 FIXTURE = ROOT / "fixture-template"
+KNOWLEDGE_REPO = "https://github.com/RObotiaga/ExteraContext-Knowledge.git"
 
 p = argparse.ArgumentParser(description="Prepare one isolated ExteraContext agent-benchmark run packet")
 p.add_argument("run_id")
@@ -21,12 +23,21 @@ if run is None:
     raise SystemExit(f"unknown run id: {args.run_id}")
 task = next(x for x in tasks if x["id"] == run["task_id"])
 
-out = args.output
+protocol_revision = run.get("protocol_revision") or manifest.get("protocol_revision")
+frozen_knowledge_commit = run.get("frozen_knowledge_commit") or manifest.get("frozen_knowledge_commit")
+if protocol_revision != "1.1":
+    raise SystemExit(f"unsupported benchmark protocol revision: {protocol_revision!r}")
+if not frozen_knowledge_commit:
+    raise SystemExit("missing frozen_knowledge_commit")
+
+out = args.output.resolve()
 if out.exists():
     shutil.rmtree(out)
 out.mkdir(parents=True)
 
 target = out / "target"
+runtime = out / "runtime"
+runtime.mkdir()
 shutil.copytree(FIXTURE, target)
 
 (out / "RUN.json").write_text(json.dumps(run, ensure_ascii=False, indent=2) + "\n", "utf-8")
@@ -53,18 +64,80 @@ Run metadata:
 - run_id: {run['run_id']}
 - mode: {run['mode']}
 - repeat: {run['repeat']}
+- protocol_revision: {protocol_revision}
+- frozen_knowledge_commit: {frozen_knowledge_commit}
 
-Work only inside this target project unless BENCHMARK_MODE.md explicitly permits an external resource.
+Work only inside this target project unless BENCHMARK_MODE.md explicitly permits an external benchmark resource.
 
 Create BENCHMARK_RESULT.json in this directory and make it match result.schema.json.
 """
 (target / "BENCHMARK_TASK.md").write_text(task_md, "utf-8")
 
+resource_setup = []
+if run["mode"] == "A":
+    resource_setup.append("No ExteraContext Knowledge or MCP resource is permitted for this run.")
+
+elif run["mode"] == "B":
+    knowledge_checkout = out / "resources" / "ExteraContext-Knowledge"
+    resource_setup.extend([
+        "Prepare a read-only checkout of raw Knowledge at exactly this commit:",
+        "",
+        f"- repository: `{KNOWLEDGE_REPO}`",
+        f"- commit: `{frozen_knowledge_commit}`",
+        f"- suggested path: `{knowledge_checkout}`",
+        "",
+        "Example operator setup:",
+        "",
+        "```bash",
+        f'git clone "{KNOWLEDGE_REPO}" "{knowledge_checkout}"',
+        f'git -C "{knowledge_checkout}" checkout --detach "{frozen_knowledge_commit}"',
+        "```",
+        "",
+        "Expose that checkout read-only to the tested agent. Do not expose ExteraContext MCP.",
+    ])
+
+elif run["mode"] == "C":
+    base_db = runtime / "exteracontext.sqlite"
+    mutable_db = runtime / "knowledge.sqlite"
+    run_root = runtime / "knowledge-runs"
+    env = {
+        "EXTERACONTEXT_KNOWLEDGE_REF": frozen_knowledge_commit,
+        "EXTERACONTEXT_AUTO_SYNC": "1",
+        "EXTERACONTEXT_DB": str(base_db),
+        "EXTERACONTEXT_KNOWLEDGE_DB": str(mutable_db),
+        "EXTERACONTEXT_RUN_ROOT": str(run_root),
+    }
+    (out / "MCP_BENCHMARK_ENV.json").write_text(json.dumps(env, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    resource_setup.extend([
+        "Start a dedicated ExteraContext MCP instance for this run.",
+        "",
+        f"The MCP source checkout is `{REPO_ROOT}`, but its current KNOWLEDGE_LOCK must **not** control the benchmark.",
+        f"Force the frozen Knowledge commit `{frozen_knowledge_commit}` and use the run-local databases under `{runtime}`.",
+        "",
+        "Use the exact environment in `MCP_BENCHMARK_ENV.json` when launching the MCP server.",
+        "This isolates both the immutable base DB and mutable write-back DB from every other benchmark run.",
+        "",
+        "Suggested stdio server command:",
+        "",
+        "```bash",
+        f'cd "{REPO_ROOT}"',
+        "node mcp/src/index.mjs --transport stdio --modern-only",
+        "```",
+        "",
+        "Do not expose the raw Knowledge checkout to the tested agent.",
+    ])
+
+(out / "RESOURCE_SETUP.md").write_text("# Benchmark resource setup\n\n" + "\n".join(resource_setup) + "\n", "utf-8")
+
 launch = f"""# Launch this run
+
+Protocol revision: **{protocol_revision}**
 
 Open the following directory as a **new, clean DSH session/project**:
 
-`{target.resolve()}`
+`{target}`
+
+Before starting the tested agent, follow `RESOURCE_SETUP.md` from the run root.
 
 Then instruct the agent:
 
@@ -73,9 +146,7 @@ Then instruct the agent:
 Mode: {run['mode']}
 Task: {run['task_id']}
 Repeat: {run['repeat']}
-
-For mode B, separately provide read-only access to the frozen ExteraContext-Knowledge checkout specified by the benchmark protocol.
-For mode C, enable the frozen ExteraContext MCP configuration and do not expose the raw Knowledge checkout.
+Frozen Knowledge: {frozen_knowledge_commit}
 """
 (out / "OPEN_IN_DSH.md").write_text(launch, "utf-8")
 
