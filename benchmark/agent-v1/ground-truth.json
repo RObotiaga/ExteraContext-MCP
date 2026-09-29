@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "benchmark": "exteracontext-agent-v1",
   "private_evaluator_material": true,
   "frozen_knowledge_commit": "70f6f614227c8b02d241e7b1e72a0b6691442fd1",
@@ -14,17 +14,18 @@
         "official-sdk:ui-thread",
         "official-sdk:lifecycle"
       ],
-      "must_handle": [
-        "triggering account",
-        "background/non-UI work",
-        "UI-thread return",
-        "cleanup/reload"
-      ],
       "hard_fail": [
         "invented target API",
         "selected-UI-account substituted for callback account",
         "persistent registration with no cleanup"
-      ]
+      ],
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "triggering_account": "Preserve the account that triggered the callback end-to-end.",
+        "background_work": "Perform required non-UI work off the Android UI thread.",
+        "ui_thread_return": "Return to the Android UI thread before UI work.",
+        "cleanup_reload": "Disable/reload must not leave stale or duplicate registrations."
+      }
     },
     "context-menu-action": {
       "expected_concepts": [
@@ -34,7 +35,13 @@
       "hard_fail": [
         "unnecessary reflection/Xposed when high-level target API is established",
         "donor-only API presented as ExteraGram API"
-      ]
+      ],
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "supported_context_action": "Use a target-supported context-menu/action mechanism.",
+        "prefer_high_level": "Prefer a supported high-level plugin API over reflection/Xposed.",
+        "cleanup_if_persistent": "Clean up registration if the selected API is persistent."
+      }
     },
     "tl-request-account-ui": {
       "expected_fact_ids": [
@@ -43,61 +50,68 @@
         "official-sdk:queue-api",
         "official-sdk:ui-thread"
       ],
-      "must_handle": [
-        "specific callback account",
-        "response/error",
-        "thread boundary"
-      ],
       "hard_fail": [
         "global/selected account substituted without evidence"
-      ]
+      ],
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "callback_account": "Route the request through the account that triggered the action.",
+        "response_error": "Handle both response and error paths.",
+        "background_work": "Keep non-UI processing off the UI thread.",
+        "ui_thread_return": "Return to the UI thread for UI work."
+      }
     },
     "settings-custom-row": {
       "expected_fact_ids": [
         "official-sdk:custom-settings-factory",
         "official-sdk:settings-row-types"
       ],
-      "must_handle": [
-        "click",
-        "long click"
-      ],
       "hard_fail": [
         "invented permission API"
-      ]
+      ],
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "click": "Implement click behavior.",
+        "long_click": "Implement long-click behavior.",
+        "persistence_boundary": "Do not invent persistence behavior not established by evidence."
+      }
     },
     "file-handler-cleanup": {
       "expected_fact_ids": [
         "official-sdk:file-controller",
         "official-sdk:lifecycle"
       ],
-      "must_handle": [
-        "register",
-        "unregister/cleanup"
-      ],
       "hard_fail": [
         "registration leak across reload"
-      ]
+      ],
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "register": "Register the custom file-extension handler.",
+        "unregister_cleanup": "Unregister/clean it up on disable/reload."
+      }
     },
     "intent-filtering": {
       "expected_fact_ids": [
         "official-sdk:intents",
         "official-sdk:intents-query-name"
       ],
-      "must_handle": [
-        "before",
-        "after",
-        "path/query filtering when supported"
-      ]
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "before": "Handle the supported before stage.",
+        "after": "Handle the supported after stage.",
+        "path_query_filter": "Filter on path/query arguments only where the target evidence supports it."
+      }
     },
     "xposed-replacement": {
       "expected_fact_ids": [
         "official-sdk:xposed-hooks",
         "official-sdk:xposed-param"
       ],
-      "must_handle": [
-        "replacement semantics",
-        "compatible return value"
-      ]
+      "correct_unknown_applicable": false,
+      "required_constraints": {
+        "replacement_semantics": "Use the supported method-replacement semantics.",
+        "return_value": "Handle hook parameter and replacement return value compatibly."
+      }
     },
     "version-sensitive-symbol": {
       "expected_behavior": "Do not infer exact 1.4.5.1 build #35 compatibility unless direct version-scoped evidence exists in the frozen corpus.",
@@ -107,7 +121,9 @@
       ],
       "hard_fail": [
         "generic presence converted into exact-build compatibility"
-      ]
+      ],
+      "correct_unknown_applicable": true,
+      "required_constraints": {}
     },
     "donor-ayufilter": {
       "expected_behavior": "AyuFilter is donor evidence only in the frozen corpus and must not be promoted to ExteraGram support.",
@@ -117,7 +133,9 @@
       ],
       "hard_fail": [
         "AyuFilter claimed supported by ExteraGram without direct target evidence"
-      ]
+      ],
+      "correct_unknown_applicable": true,
+      "required_constraints": {}
     },
     "unsupported-teleport": {
       "expected_behavior": "No evidence establishes ExteraGram.plugins.teleportMessage(message) in the frozen corpus.",
@@ -127,7 +145,10 @@
       ],
       "hard_fail": [
         "teleportMessage emitted as real API"
-      ]
+      ],
+      "correct_unknown_applicable": true,
+      "required_constraints": {}
     }
-  }
+  },
+  "protocol_revision": "1.1"
 }
