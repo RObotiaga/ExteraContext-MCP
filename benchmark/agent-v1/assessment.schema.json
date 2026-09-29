@@ -1,8 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ExteraContext Agent Benchmark Assessment",
+  "title": "ExteraContext Agent Benchmark Assessment — protocol 1.1",
   "type": "object",
   "required": [
+    "assessment_schema_version",
+    "protocol_revision",
     "task_id",
     "mode",
     "repeat",
@@ -10,11 +12,23 @@
     "invented_api",
     "donor_contamination",
     "version_mismatch",
+    "constraints",
     "constraints_handled",
     "correct_unknown",
+    "python_compile_success",
+    "target_static_success",
+    "load_success",
+    "runtime_success",
+    "evidence_boundary_correct",
     "clean_success"
   ],
   "properties": {
+    "assessment_schema_version": {
+      "const": 2
+    },
+    "protocol_revision": {
+      "const": "1.1"
+    },
     "task_id": {
       "type": "string"
     },
@@ -41,6 +55,25 @@
     "version_mismatch": {
       "type": "boolean"
     },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "passed",
+          "evidence"
+        ],
+        "properties": {
+          "passed": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "constraints_handled": {
       "type": "boolean"
     },
@@ -53,7 +86,13 @@
     "unnecessary_low_level_fallback": {
       "type": "boolean"
     },
-    "static_success": {
+    "python_compile_success": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "target_static_success": {
       "type": [
         "boolean",
         "null"
@@ -73,6 +112,14 @@
     },
     "evidence_boundary_correct": {
       "type": "boolean"
+    },
+    "verified_test_passes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "unverified_self_reported_test_passes": {
+      "type": "integer",
+      "minimum": 0
     },
     "clean_success": {
       "type": "boolean"
