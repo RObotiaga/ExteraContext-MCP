@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ExteraContext Agent Benchmark Result",
+  "title": "ExteraContext Agent Benchmark Result — protocol 1.1",
   "type": "object",
   "required": [
     "benchmark",
+    "protocol_revision",
     "task_id",
     "mode",
     "repeat",
@@ -83,11 +84,13 @@
         "type": "object",
         "required": [
           "name",
-          "status"
+          "status",
+          "evidence"
         ],
         "properties": {
           "name": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "status": {
             "enum": [
@@ -98,8 +101,68 @@
           },
           "details": {
             "type": "string"
+          },
+          "evidence": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              },
+              "artifact_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "exit_code": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "log_excerpt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "evidence": {
+                  "type": "object",
+                  "anyOf": [
+                    {
+                      "required": [
+                        "command"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "artifact_path"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": true
       }
     },
     "tool_calls": {
@@ -136,6 +199,9 @@
         "null"
       ],
       "minimum": 0
+    },
+    "protocol_revision": {
+      "const": "1.1"
     }
   },
   "additionalProperties": true
