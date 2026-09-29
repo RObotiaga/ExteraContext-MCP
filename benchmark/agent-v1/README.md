@@ -1,6 +1,6 @@
-# Agent benchmark v1
+# Agent benchmark v1 — protocol 1.1
 
-This directory contains the first frozen end-to-end A/B/C benchmark for ExteraContext MCP.
+This directory contains the frozen end-to-end A/B/C benchmark for ExteraContext MCP.
 
 ## What it compares
 
@@ -12,6 +12,10 @@ The benchmark is frozen to Knowledge commit:
 
 `70f6f614227c8b02d241e7b1e72a0b6691442fd1`
 
+Protocol revision **1.1** fixes evaluator/test-evidence semantics and makes the frozen Knowledge pin explicit for both B and C.
+
+Results produced with the earlier protocol must be treated as pilot data and must not be mixed into the final 60-run aggregate. In particular, the original `v1-001` run should be rerun from a newly generated packet.
+
 ## Files
 
 - `tasks.json` — public task prompts.
@@ -19,20 +23,36 @@ The benchmark is frozen to Knowledge commit:
 - `result.schema.json` — tested-agent output contract.
 - `ground-truth.json` — evaluator-only material; never copy it into the tested agent workspace.
 - `assessment.schema.json` — evaluator record format.
-- `run-manifest.json` — 60-run minimum schedule.
+- `run-manifest.json` — 60-run schedule with frozen protocol/Knowledge metadata.
+- `prepare_run.py` — generates an isolated target and mode-specific operator resource setup.
+- `EVALUATOR.md` — evaluator rules.
 - `aggregate.py` — aggregate evaluator records.
+- `validate.py` — benchmark/regression validation.
+
+## Protocol 1.1 corrections
+
+- Required task constraints are evaluated individually. `constraints_handled=true` only when every required constraint passes.
+- `correct_unknown` is null for tasks where that metric is not applicable.
+- Python compilation and target-specific static validation are separate metrics.
+- A self-reported test `pass` must include a rerunnable command or an existing artifact/log path.
+- Mode C uses its own run-local immutable/mutable SQLite paths and forces the same frozen Knowledge commit used by Mode B.
+- The aggregator rejects legacy/mixed assessment revisions.
 
 ## Recommended procedure
 
 For each manifest row:
 
-1. Start a completely fresh DSH/model session.
-2. Reset the target fixture/project to the same commit.
-3. Expose only the resources permitted by that mode.
-4. Give the corresponding mode prompt plus the task text.
-5. Save the final worktree/patch, `BENCHMARK_RESULT.json`, runner telemetry and logs under a unique run directory.
-6. Outside the tested agent context, score the run with `ground-truth.json` and write `assessment.json`.
-7. Do not let results from one run enter the context of another.
+1. Pull the current benchmark code.
+2. Generate a **new** run packet:
+   ```bash
+   python benchmark/agent-v1/prepare_run.py v1-001 ./run-v1-001
+   ```
+3. Follow `run-v1-001/RESOURCE_SETUP.md` before launching the tested agent.
+4. Start a completely fresh DSH/model session and open only `run-v1-001/target`.
+5. Use the same model/version/reasoning setting, target fixture, time/token budget and ordinary tool permissions across A/B/C.
+6. Save the final worktree, `BENCHMARK_RESULT.json`, runner telemetry and logs under the unique run directory.
+7. Outside the tested-agent context, score the run with `ground-truth.json` and write a protocol-1.1 `assessment.json`.
+8. Do not let previous answers, ground truth or evaluator notes enter another run.
 
 After all runs:
 
@@ -40,19 +60,28 @@ After all runs:
 python benchmark/agent-v1/aggregate.py path/to/benchmark-results
 ```
 
-The primary metric is Clean Task Success Rate. Treat missing structured output as a failed structured run rather than silently dropping it.
+The primary metric is Clean Task Success Rate.
 
+## Self-contained target packets
 
-## Self-contained run packets
+Every run contains:
 
-`prepare_run.py` now creates an isolated `target/` project. Open that exact directory in a fresh DSH session; no external target fixture is required.
-
-Example:
-
-```bash
-python benchmark/agent-v1/prepare_run.py v1-001 ./run-v1-001
+```text
+run-v1-XXX/
+├── OPEN_IN_DSH.md
+├── RESOURCE_SETUP.md
+├── RUN.json
+├── TASK.json
+├── runtime/
+└── target/
+    ├── README.md
+    ├── plugin.py
+    ├── fixture.json
+    ├── BENCHMARK_MODE.md
+    ├── BENCHMARK_TASK.md
+    └── result.schema.json
 ```
 
-Then open `./run-v1-001/target` in DSH and follow `BENCHMARK_MODE.md` + `BENCHMARK_TASK.md`.
+Mode B additionally needs a read-only checkout of the exact frozen Knowledge commit described in `RESOURCE_SETUP.md`.
 
-Mode B still requires read-only access to the separately frozen Knowledge checkout, and mode C requires the MCP connection. These are benchmark resources, not part of the target fixture.
+Mode C must launch a dedicated MCP instance using `MCP_BENCHMARK_ENV.json`. Those environment variables override the repository's current `KNOWLEDGE_LOCK` and isolate the base DB, mutable knowledge DB and write-back run root for that one benchmark run.
