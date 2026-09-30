@@ -350,8 +350,11 @@ def deploy(db: Path, lock_path: Path) -> bool:
         except (OSError, ValueError, sqlite3.Error, json.JSONDecodeError):
             pass
     db.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".knowledge-release-", dir=db.parent) as td:
-        stage = Path(td)
+    # Explicit lifetime: failed rollback must leave recovery bytes on disk, not
+    # lose them to TemporaryDirectory.__exit__ or its weakref finalizer.
+    stage = Path(tempfile.mkdtemp(prefix=".knowledge-release-", dir=db.parent))
+    preserve_recovery = False
+    try:
         staged_db = stage / lock["database_asset"]
         staged_manifest = stage / lock["manifest_asset"]
         manifest_bytes = fetch_release_assets(lock, staged_db)
@@ -413,10 +416,17 @@ def deploy(db: Path, lock_path: Path) -> bool:
                     rollback_errors.append(rollback_error)
             _fsync_directory(db.parent)
             if rollback_errors:
+                preserve_recovery = True
+                _fsync_directory(stage)
+                _fsync_directory(db.parent)
                 raise OSError(
-                    f"release replacement failed and rollback was incomplete: {rollback_errors[0]}"
+                    f"release replacement failed and rollback was incomplete: {rollback_errors[0]}; "
+                    f"recovery files preserved at {stage}; stop writers and restore the previous pair manually"
                 ) from replace_error
             raise
+    finally:
+        if not preserve_recovery:
+            shutil.rmtree(stage)
     return True
 
 

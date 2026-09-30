@@ -120,6 +120,35 @@ class KnowledgeReleaseTests(unittest.TestCase):
         self.lock_path.write_text(json.dumps(self.lock, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         self.assets = {"exteracontext.sqlite": self.source_db.read_bytes(), "manifest.json": self.manifest_path.read_bytes()}
 
+    def test_json_output_exclusively_creates_new_file(self):
+        output = self.root / "new-manifest.json"
+        release_cli.write_json(output, self.manifest)
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8")), self.manifest)
+        before = output.read_bytes()
+        with self.assertRaises(FileExistsError):
+            release_cli.write_json(output, {"overwrite": True})
+        self.assertEqual(output.read_bytes(), before)
+
+    def test_manifest_cli_rejects_container_output_symlink(self):
+        victim = self.root / "smoke.py"
+        victim.write_text("raise AssertionError('original smoke test')\n", encoding="utf-8")
+        original = victim.read_bytes()
+        for target in (victim, self.root / "absent-victim.py"):
+            with self.subTest(target=target.name):
+                output = self.root / f"linked-{target.name}.json"
+                try:
+                    output.symlink_to(target)
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlinks are unavailable on this platform")
+                with self.assertRaises(SystemExit) as error:
+                    release_cli.main(["manifest", "--db", str(self.source_db),
+                                      "--source-commit", COMMIT, "--output", str(output)])
+                self.assertEqual(error.exception.code, 1)
+                self.assertTrue(output.is_symlink())
+                self.assertEqual(victim.read_bytes(), original)
+                if target != victim:
+                    self.assertFalse(target.exists())
+
     def test_privileged_publisher_hashes_bytes_and_only_parses_manifest_json(self):
         workflow = (ROOT / ".github" / "workflows" / "sync-knowledge.yml").read_text(encoding="utf-8")
         publisher = workflow.split("  publish-and-open-pr:", 1)[1]
@@ -338,6 +367,34 @@ class KnowledgeReleaseTests(unittest.TestCase):
                 else:
                     self.assertFalse(deployed.exists())
                     self.assertFalse(manifest_path.exists())
+
+    def test_incomplete_rollback_preserves_recovery_pair_and_reports_directory(self):
+        deployed = self.root / "failed-rollback" / "exteracontext.sqlite"
+        deployed.parent.mkdir()
+        manifest_path = deployed.parent / ".knowledge-manifest.json"
+        old_db, old_manifest = b"previous database", b"previous manifest"
+        deployed.write_bytes(old_db)
+        manifest_path.write_bytes(old_manifest)
+        real_replace = Path.replace
+
+        def fail_manifest_and_db_restore(source, target):
+            if source.name in {"manifest.json", "restore-exteracontext.sqlite"}:
+                raise PermissionError("injected locked destination")
+            return real_replace(source, target)
+
+        with (patch.object(updater, "opener", return_value=FakeOpener(self.assets)),
+              patch.object(Path, "replace", new=fail_manifest_and_db_restore),
+              self.assertRaisesRegex(OSError, "rollback was incomplete") as error):
+            updater.deploy(deployed, self.lock_path)
+        recovery_dirs = list(deployed.parent.glob(".knowledge-release-*"))
+        self.assertEqual(len(recovery_dirs), 1)
+        recovery = recovery_dirs[0]
+        self.assertIn(str(recovery), str(error.exception))
+        self.assertEqual((recovery / "previous-database").read_bytes(), old_db)
+        self.assertEqual((recovery / "previous-manifest").read_bytes(), old_manifest)
+        self.assertEqual(deployed.read_bytes(), self.assets["exteracontext.sqlite"])
+        self.assertEqual(manifest_path.read_bytes(), old_manifest)
+        self.assertIsInstance(error.exception.__cause__, PermissionError)
 
     def test_hash_mismatch_preserves_existing_database(self):
         opener = FakeOpener(self.assets, corrupt=True)

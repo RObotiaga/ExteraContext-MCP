@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -66,6 +67,10 @@ class BenchmarkIntegrityTests(unittest.TestCase):
                 "algorithm": "HMAC-SHA256", "signature": signature,
             }}), encoding="utf-8")
             expected["attestation_sha256"] = hashlib.sha256(attestation.read_bytes()).hexdigest()
+            (packet / "MCP_BENCHMARK_ENV.json").write_text(json.dumps({
+                "EXTERACONTEXT_DB": str(db.resolve()),
+                "EXTERACONTEXT_AUTO_SYNC": "0",
+            }), encoding="utf-8")
             doctor = packet / "doctor.json"
             doctor.write_text(json.dumps({"structuredContent": {
                 "ok": True,
@@ -215,6 +220,49 @@ class BenchmarkIntegrityTests(unittest.TestCase):
                 artifact.write_text(json.dumps(doctor), encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, message):
                     self._check(packet, row)
+
+    def test_mode_c_requires_valid_recorded_launch_environment(self):
+        for contents in (None, "{", "[]", "{}", '{"EXTERACONTEXT_DB": 1}'):
+            with self.subTest(contents=contents):
+                packet, _, row = self._packet("C")
+                launch = packet / "MCP_BENCHMARK_ENV.json"
+                if contents is None:
+                    launch.unlink()
+                else:
+                    launch.write_text(contents, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "launch environment"):
+                    self._check(packet, row)
+
+    def test_mode_c_accepts_captured_server_paths_from_another_platform(self):
+        for captured_path in ("/server/mounted-run/runtime/exteracontext.sqlite",
+                              r"Z:\archived-run\runtime\exteracontext.sqlite"):
+            with self.subTest(captured_path=captured_path):
+                packet, _, row = self._packet("C")
+                launch = packet / "MCP_BENCHMARK_ENV.json"
+                launch.write_text(json.dumps({"EXTERACONTEXT_DB": captured_path}), encoding="utf-8")
+                artifact = packet / "doctor.json"
+                doctor = json.loads(artifact.read_text(encoding="utf-8"))
+                doctor["structuredContent"]["data"]["index"]["db_path"] = captured_path
+                artifact.write_text(json.dumps(doctor), encoding="utf-8")
+                self._check(packet, row)
+
+    def test_complete_schedule_can_be_copied_and_original_paths_removed(self):
+        records = self._complete_schedule_records()
+        copied = self.root / "archived-results"
+        copied.mkdir()
+        copied_records = []
+        for assessment, row in records:
+            destination = copied / assessment.parent.name
+            shutil.copytree(assessment.parent, destination)
+            copied_records.append((destination / assessment.name, row))
+        # Original capture paths still exist, but are not current packet paths.
+        self.assertEqual(scoring.summarize(copied_records, attestation_key_path=self.key_path)["runs"], 60)
+        originals = self.root / "relocated-originals"
+        originals.mkdir()
+        for assessment, _ in records:
+            assessment.parent.rename(originals / assessment.parent.name)
+        # Now historical paths are absent. No doctor/launch/signature bytes changed.
+        self.assertEqual(scoring.summarize(copied_records, attestation_key_path=self.key_path)["runs"], 60)
 
     def test_correct_in_packet_mode_c_evidence_passes(self):
         packet, _, row = self._packet("C")

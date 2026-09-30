@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +24,20 @@ import update_knowledge as release  # noqa: E402
 
 def write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Publish a complete host-owned file without opening the destination at all.
+    # link() atomically refuses ANY existing destination entry, including dangling
+    # symlinks (Windows open("x") can follow those). Same-parent staging ensures
+    # the hardlink stays on one filesystem; unsupported filesystems fail closed.
+    fd, temporary = tempfile.mkstemp(prefix=".knowledge-json-", dir=path.parent)
+    staged = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 MAX_MANIFEST_BYTES = 1024 * 1024

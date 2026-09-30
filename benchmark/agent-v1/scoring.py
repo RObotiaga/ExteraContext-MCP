@@ -284,7 +284,6 @@ def _check_environment(row: dict, packet: Path, packet_run: dict, manifest_run: 
         raise ValueError(f"{manifest_run['run_id']}: in-packet attestation does not bind the pinned corpus")
 
     doctor_path = _packet_file(packet, evidence.get("doctor_artifact_path"), "MCP doctor")
-    database = database.resolve(strict=True)
     try:
         doctor = json.loads(doctor_path.read_text(encoding="utf-8"))
         structured = doctor["structuredContent"]
@@ -302,12 +301,19 @@ def _check_environment(row: dict, packet: Path, packet_run: dict, manifest_run: 
     doctor_db_path = index.get("db_path")
     if not isinstance(doctor_db_path, str) or not doctor_db_path:
         raise ValueError(f"{manifest_run['run_id']}: doctor index lacks db_path")
+    # Paths in captured evidence belong to the server's launch filesystem, not
+    # the evaluator's. Compare with the archived launch environment literally;
+    # current packet bytes are independently bound by the signed hash above.
+    launch_path = _packet_file(packet, "MCP_BENCHMARK_ENV.json", "MCP launch environment")
     try:
-        resolved_doctor_db_path = Path(doctor_db_path).expanduser().resolve(strict=True)
-    except (OSError, RuntimeError) as exc:
-        raise ValueError(f"{manifest_run['run_id']}: doctor index db_path cannot be resolved") from exc
-    if resolved_doctor_db_path != database:
-        raise ValueError(f"{manifest_run['run_id']}: doctor index db_path does not match packet SQLite")
+        launch = json.loads(launch_path.read_text(encoding="utf-8"))
+        launched_db_path = launch.get("EXTERACONTEXT_DB") if isinstance(launch, dict) else None
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"{manifest_run['run_id']}: invalid MCP launch environment") from exc
+    if not isinstance(launched_db_path, str) or not launched_db_path.strip():
+        raise ValueError(f"{manifest_run['run_id']}: MCP launch environment lacks EXTERACONTEXT_DB")
+    if doctor_db_path != launched_db_path:
+        raise ValueError(f"{manifest_run['run_id']}: doctor index db_path does not match recorded MCP launch environment")
     if index.get("db_sha256") != expected["db_sha256"]:
         raise ValueError(f"{manifest_run['run_id']}: doctor index db_sha256 does not match pinned database hash")
     signed_db_size = attestation_payload.get("db_size_bytes")
