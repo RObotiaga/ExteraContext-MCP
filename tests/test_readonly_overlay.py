@@ -2,6 +2,7 @@
 """Regression coverage for optional read-only overlays and evidence direction."""
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 import tempfile
@@ -95,7 +96,8 @@ class ReadOnlyOverlayTests(unittest.TestCase):
         """)
         c.close()
         self.db.write_bytes(b"not a sqlite database")
-        with patch.object(ks, "KNOWLEDGE_DB", self.db), patch.object(query, "DB", base):
+        with patch.object(ks, "KNOWLEDGE_DB", self.db), patch.object(query, "DB", base), \
+             patch.dict(os.environ, {"EXTERACONTEXT_DB": str(base)}):
             for read in (lambda: query.search_dynamic_facts("message"),
                          lambda: query.api_lookup("message"),
                          lambda: query.command_evidence(query.argparse.Namespace(key="knowledge:x", limit=2, format="json")),

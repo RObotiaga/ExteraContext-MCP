@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -107,52 +108,58 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="strict")
 
 
-def _desired_knowledge_ref() -> str:
-    explicit = os.environ.get("EXTERACONTEXT_KNOWLEDGE_REF")
-    if explicit:
-        return explicit.strip()
-    lock = SKILL_ROOT / "KNOWLEDGE_LOCK"
-    if lock.exists():
-        value = lock.read_text("utf-8").strip()
-        if value:
-            return value
-    return "main"
-
-
-def _knowledge_stamp_matches() -> bool:
-    stamp = DB.parent / ".knowledge-ref"
-    if not stamp.exists():
-        return False
-    return stamp.read_text("utf-8").strip() == _desired_knowledge_ref()
+_AUTO_SYNC_DONE = False
 
 
 def ensure_db() -> None:
-    auto_sync = os.environ.get("EXTERACONTEXT_AUTO_SYNC", "").lower() in {"1", "true", "yes", "on"}
-
-    # Monolithic/development checkout compatibility.
-    build = SKILL_ROOT / "scripts" / "build_index.py"
-    if build.exists() and WIKI.exists():
-        if not DB.exists():
-            subprocess.run([sys.executable, str(build), "--wiki", str(WIKI), "--db", str(DB)], check=True, stdout=subprocess.DEVNULL)
-        return
-
-    # Split-repository mode: refresh only when the pinned Knowledge commit changed.
-    if auto_sync and (not DB.exists() or not _knowledge_stamp_matches()):
-        sync = SKILL_ROOT / "scripts" / "sync_knowledge.py"
-        subprocess.run(
-            [sys.executable, str(sync), "--ref", _desired_knowledge_ref(), "--db", str(DB)],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-        return
+    global _AUTO_SYNC_DONE
+    auto_sync = os.environ.get("EXTERACONTEXT_AUTO_SYNC", "").strip().lower()
+    if auto_sync in {"1", "true", "yes", "on"} and not _AUTO_SYNC_DONE:
+        updater = SKILL_ROOT / "scripts" / "update_knowledge.py"
+        lock = Path(os.environ.get("EXTERACONTEXT_KNOWLEDGE_LOCK", SKILL_ROOT / "KNOWLEDGE_LOCK"))
+        try:
+            subprocess.run(
+                [sys.executable, str(updater), "--db", str(DB), "--lock", str(lock)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                "EXTERACONTEXT_AUTO_SYNC requested the trusted, hash-pinned Knowledge updater, "
+                f"but it failed closed (exit {exc.returncode}); check KNOWLEDGE_LOCK and the "
+                "protected per-commit release artifact."
+            ) from exc
+        _AUTO_SYNC_DONE = True
 
     if DB.exists():
         return
 
+    # Explicit development-only compatibility for monolithic wiki checkouts.
+    # Production/split-repository deployments must provision the SQLite artifact
+    # deliberately with scripts/sync_knowledge.py; query must not build implicitly.
+    auto_build = os.environ.get("EXTERACONTEXT_AUTO_BUILD", "").strip().lower()
+    if auto_build in {"1", "true", "yes", "on"}:
+        build = SKILL_ROOT / "scripts" / "build_index.py"
+        if build.is_file() and WIKI.is_dir():
+            subprocess.run(
+                [sys.executable, str(build), "--wiki", str(WIKI), "--db", str(DB)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            return
+        raise FileNotFoundError(
+            "EXTERACONTEXT_AUTO_BUILD is enabled, but this checkout has no local "
+            f"build_index.py/WIKI source ({build}, {WIKI})."
+        )
+
     raise FileNotFoundError(
-        f"ExteraContext base database not found at {DB}. "
-        "Run `python scripts/sync_knowledge.py` or set EXTERACONTEXT_AUTO_SYNC=1."
+        f"ExteraContext base database not found at {DB}. Provision an existing corpus offline with "
+        "`python scripts/sync_knowledge.py --source <existing.sqlite> --db <destination.sqlite>`. "
+        "This command only validates and copies an existing database; it does not download or build "
+        "knowledge. For local monolithic development only, opt into a build with "
+        "EXTERACONTEXT_AUTO_BUILD=1."
     )
+
 
 
 def con() -> sqlite3.Connection:
@@ -667,22 +674,101 @@ def command_context(args: argparse.Namespace) -> None:
         print(render_context_md(p))
 
 
+def _identity_from_stat(stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _stat_identity(path: Path) -> tuple[int, int, int, int, int]:
+    return _identity_from_stat(path.stat())
+
+
+def _same_file_identity(left: tuple[int, int, int, int, int], right: tuple[int, int, int, int, int]) -> bool:
+    # Windows exposes st_ctime differently through path stat and fstat; stable
+    # file-object identity is device, inode/file-id, size and modification time.
+    return left[:4] == right[:4]
+
+
+def _hash_database(path: Path, expected_identity: tuple[int, int, int, int, int] | None = None) -> tuple[int, str]:
+    """Hash stable bytes from one open file; reject path replacement or file mutation.
+
+    The digest describes bytes read from the opened descriptor. Identity checks bind
+    that descriptor to the SQLite-read snapshot and ensure the path still names it.
+    This does not protect against arbitrary writers that bypass quiescence controls.
+    """
+    resolved = path.expanduser().resolve(strict=True)
+    path_before_open = _stat_identity(resolved)
+    if expected_identity is not None and path_before_open != expected_identity:
+        raise RuntimeError(f"ExteraContext base database changed after it was read: {resolved}")
+
+    digest = hashlib.sha256()
+    bytes_read = 0
+    with resolved.open("rb") as source:
+        descriptor_before = _identity_from_stat(os.fstat(source.fileno()))
+        path_before_stream = _stat_identity(resolved)
+        identity_before = expected_identity if expected_identity is not None else path_before_open
+        if (
+            not _same_file_identity(descriptor_before, identity_before)
+            or path_before_stream != identity_before
+            or not _same_file_identity(descriptor_before, path_before_stream)
+        ):
+            raise RuntimeError(f"ExteraContext base database changed while hashing: {resolved}")
+
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            bytes_read += len(chunk)
+
+        descriptor_after = _identity_from_stat(os.fstat(source.fileno()))
+        path_after_stream = _stat_identity(resolved)
+        if (
+            descriptor_before != descriptor_after
+            or not _same_file_identity(descriptor_after, identity_before)
+            or path_after_stream != identity_before
+            or not _same_file_identity(descriptor_after, path_after_stream)
+            or bytes_read != descriptor_before[2]
+            or bytes_read != descriptor_after[2]
+        ):
+            raise RuntimeError(f"ExteraContext base database changed while hashing: {resolved}")
+    return bytes_read, digest.hexdigest()
+
+
 def command_doctor(args: argparse.Namespace) -> None:
+    # Complete any explicitly opted-in update before sampling file identity.
+    ensure_db()
+    configured_db = Path(os.environ.get("EXTERACONTEXT_DB", str(DB))).expanduser().resolve(strict=True)
+    from sync_knowledge import require_quiescent
+
+    require_quiescent(configured_db)
+    identity_before_open = _stat_identity(configured_db)
     c = con()
-    meta = {r[0]: json.loads(r[1]) for r in c.execute("SELECT key,value FROM meta")}
-    runtime = c.execute("SELECT COUNT(*) FROM facts WHERE status='runtime-verified'").fetchone()[0]
-    direct = c.execute("SELECT COUNT(*) FROM facts WHERE source_id IN (%s)" % ",".join("?"*len(DIRECT_SOURCES)), tuple(sorted(DIRECT_SOURCES))).fetchone()[0]
     try:
-        meta["legacy_source_runs"] = c.execute("SELECT COUNT(*) FROM source_runs").fetchone()[0]
-        meta["legacy_sources_with_reviewers"] = c.execute("SELECT COUNT(*) FROM source_provenance WHERE has_reviewer=1").fetchone()[0]
-    except sqlite3.OperationalError:
-        meta["legacy_source_runs"] = 0
-        meta["legacy_sources_with_reviewers"] = 0
-    c.close()
+        meta = {r[0]: json.loads(r[1]) for r in c.execute("SELECT key,value FROM meta")}
+        runtime = c.execute("SELECT COUNT(*) FROM facts WHERE status='runtime-verified'").fetchone()[0]
+        direct = c.execute("SELECT COUNT(*) FROM facts WHERE source_id IN (%s)" % ",".join("?"*len(DIRECT_SOURCES)), tuple(sorted(DIRECT_SOURCES))).fetchone()[0]
+        try:
+            meta["legacy_source_runs"] = c.execute("SELECT COUNT(*) FROM source_runs").fetchone()[0]
+            meta["legacy_sources_with_reviewers"] = c.execute("SELECT COUNT(*) FROM source_provenance WHERE has_reviewer=1").fetchone()[0]
+        except sqlite3.OperationalError:
+            meta["legacy_source_runs"] = 0
+            meta["legacy_sources_with_reviewers"] = 0
+        opened_db = Path(c.execute("PRAGMA database_list").fetchone()[2]).resolve(strict=True)
+        identity_after_read = _stat_identity(opened_db)
+    finally:
+        c.close()
+
+    if configured_db != opened_db:
+        raise RuntimeError(f"EXTERACONTEXT_DB changed after the corpus was opened: {configured_db} != {opened_db}")
+    if identity_before_open != identity_after_read:
+        raise RuntimeError(f"ExteraContext base database changed while it was being read: {configured_db}")
+
+    size_bytes, sha256 = _hash_database(configured_db, expected_identity=identity_after_read)
     meta["runtime_verified"] = runtime
     meta["direct_ecosystem_facts"] = direct
     meta["db"] = str(DB)
+    meta["db_path"] = str(configured_db)
+    meta["db_size_bytes"] = size_bytes
+    meta["db_sha256"] = sha256
     meta["agent_knowledge"] = ks.stats()
+    require_quiescent(configured_db)
     print(json.dumps(meta, ensure_ascii=False, indent=2))
 
 

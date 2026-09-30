@@ -28,7 +28,7 @@ REQUIRED_COLUMNS = {
 
 def require_quiescent(path: Path) -> None:
     """immutable SQLite reads do not see WAL; never silently discard WAL transactions."""
-    for suffix in ("-wal", "-journal"):
+    for suffix in ("-wal", "-shm", "-journal"):
         sidecar = Path(str(path) + suffix)
         if sidecar.exists() and sidecar.stat().st_size:
             raise ValueError(f"nonempty SQLite {suffix} sidecar: {sidecar}; quiesce/checkpoint externally first")

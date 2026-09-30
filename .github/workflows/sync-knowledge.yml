@@ -1,28 +1,226 @@
-name: Knowledge maintenance (manual preflight only)
+name: Knowledge candidate, validation, and protected publication
 
-# No schedule, external fetch, corpus build, pin advance, or automatic publish.
-# A separate, explicitly approved change is required before enabling any of those.
+# This workflow does not collect sources. It resolves the current upstream commit,
+# builds that exact tree in an unprivileged, no-network container, runs the project's
+# full test suites against the candidate, then waits for a protected environment
+# before publishing immutable-by-hash assets and opening a PR to develop.
 on:
+  schedule:
+    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
-      confirmation:
-        description: "Enter I_AUTHORIZE_KNOWLEDGE_PREFLIGHT to run offline fixture checks; this does NOT collect or publish knowledge."
-        required: true
+      source_commit:
+        description: "Optional exact 40-character Knowledge commit; empty resolves upstream main at run time."
+        required: false
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: knowledge-update
+  cancel-in-progress: false
+
 jobs:
-  offline-preflight:
-    if: ${{ inputs.confirmation == 'I_AUTHORIZE_KNOWLEDGE_PREFLIGHT' }}
+  build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       EXTERACONTEXT_AUTO_SYNC: "0"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+    outputs:
+      source_commit: ${{ steps.refs.outputs.commit }}
+      changed: ${{ steps.refs.outputs.changed }}
+      db_sha256: ${{ steps.package.outputs.db_sha256 }}
+      manifest_sha256: ${{ steps.package.outputs.manifest_sha256 }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout this project
+        uses: actions/checkout@v4
         with:
-          python-version: "3.12"
-      - name: Test isolated offline fixtures
-        run: python tests/test_ci_offline.py
+          persist-credentials: false
+      - name: Resolve exact Knowledge main commit
+        id: refs
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$REQUESTED_COMMIT" ]]; then
+            commit="$REQUESTED_COMMIT"
+          else
+            commit="$(git ls-remote https://github.com/RObotiaga/ExteraContext-Knowledge.git refs/heads/main | cut -f1)"
+          fi
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "Expected exact upstream commit SHA" >&2; exit 1; }
+          current="$(python -c 'import json,pathlib,re; p=pathlib.Path("KNOWLEDGE_LOCK"); s=p.read_text().strip(); print(json.loads(s).get("source_commit", "") if s.startswith("{") else (s if re.fullmatch(r"[0-9a-f]{40}",s) else ""))')"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [[ "$current" == "$commit" ]] && python -c 'import json,pathlib,sys; p=pathlib.Path("KNOWLEDGE_LOCK"); s=p.read_text().strip(); sys.exit(0 if s.startswith("{") else 1)' ; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Pinned Knowledge commit already current."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Checkout exact Knowledge source without persisted credentials
+        if: steps.refs.outputs.changed == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: RObotiaga/ExteraContext-Knowledge
+          ref: ${{ steps.refs.outputs.commit }}
+          path: upstream
+          persist-credentials: false
+          submodules: false
+      - name: Build SQLite candidate with no network, no capabilities, read-only source
+        if: steps.refs.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/knowledge-candidate"
+          # The container runs as nobody (65534), not the runner owner. A sticky
+          # world-writable directory lets that UID create its output without
+          # granting it write access to the directory's other entries.
+          chmod 1777 "$RUNNER_TEMP/knowledge-candidate"
+          test "$(git -C upstream rev-parse HEAD)" = "${{ steps.refs.outputs.commit }}"
+          docker run --rm \
+            --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=256 --memory=4g --cpus=2 --user 65534:65534 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=1g \
+            -v "$PWD/upstream:/source:ro" \
+            -v "$RUNNER_TEMP/knowledge-candidate:/out:rw" \
+            python:3.12-slim python /source/scripts/build_index.py \
+              --wiki /source/data/wiki \
+              --provenance /source/data/legacy-source-runs.json \
+              --db /out/exteracontext.sqlite
+      - name: Validate candidate and create source-bound manifest
+        if: steps.refs.outputs.changed == 'true'
+        run: |
+          python -B scripts/knowledge_release.py manifest \
+            --db "$RUNNER_TEMP/knowledge-candidate/exteracontext.sqlite" \
+            --source-commit "${{ steps.refs.outputs.commit }}" \
+            --output "$RUNNER_TEMP/knowledge-candidate/manifest.json"
+          python -B scripts/knowledge_release.py verify \
+            --db "$RUNNER_TEMP/knowledge-candidate/exteracontext.sqlite" \
+            --manifest "$RUNNER_TEMP/knowledge-candidate/manifest.json" \
+            --source-commit "${{ steps.refs.outputs.commit }}"
+      - name: Run full project tests against candidate corpus
+        if: steps.refs.outputs.changed == 'true'
+        env:
+          EXTERACONTEXT_DB: ${{ runner.temp }}/knowledge-candidate/exteracontext.sqlite
+          EXTERACONTEXT_KNOWLEDGE_DB: ${{ runner.temp }}/knowledge-candidate/overlay.sqlite
+          EXTERACONTEXT_AUTO_SYNC: "0"
+        run: |
+          python -B -m unittest discover -s tests -p 'test_*.py' -v
+          python -B tests/smoke.py
+          python -B tests/test_skill_contract.py
+          python -B tests/test_knowledge_writeback.py
+          python -B tests/test_orchestrator.py
+          python -B benchmark/agent-v1/validate.py
+      - name: Run MCP integration tests against candidate corpus
+        if: steps.refs.outputs.changed == 'true'
+        working-directory: mcp
+        env:
+          EXTERACONTEXT_PYTHON: python
+          EXTERACONTEXT_DB: ${{ runner.temp }}/knowledge-candidate/exteracontext.sqlite
+          EXTERACONTEXT_KNOWLEDGE_DB: ${{ runner.temp }}/knowledge-candidate/mcp-overlay.sqlite
+          EXTERACONTEXT_AUTO_SYNC: "0"
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Inventory candidate content hashes
+        id: package
+        if: steps.refs.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          db="$RUNNER_TEMP/knowledge-candidate/exteracontext.sqlite"
+          manifest="$RUNNER_TEMP/knowledge-candidate/manifest.json"
+          echo "db_sha256=$(sha256sum "$db" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha256=$(sha256sum "$manifest" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload tested candidate for gated publisher
+        if: steps.refs.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-candidate-${{ steps.refs.outputs.commit }}
+          path: |
+            ${{ runner.temp }}/knowledge-candidate/exteracontext.sqlite
+            ${{ runner.temp }}/knowledge-candidate/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-and-open-pr:
+    needs: build-and-test
+    if: needs.build-and-test.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: knowledge-publish
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+      - name: Download tested candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: knowledge-candidate-${{ needs.build-and-test.outputs.source_commit }}
+          path: candidate
+      - name: Verify candidate hashes and construct lock
+        shell: bash
+        env:
+          EXPECTED_DB_SHA256: ${{ needs.build-and-test.outputs.db_sha256 }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.build-and-test.outputs.manifest_sha256 }}
+          SOURCE_COMMIT: ${{ needs.build-and-test.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          # The privileged publisher intentionally never opens/parses candidate SQLite.
+          # The unprivileged build job performed full SQLite+manifest verification; here
+          # we bind exact downloaded bytes to its job outputs, then inspect bounded JSON only.
+          test "$(sha256sum candidate/exteracontext.sqlite | cut -d' ' -f1)" = "$EXPECTED_DB_SHA256"
+          test "$(sha256sum candidate/manifest.json | cut -d' ' -f1)" = "$EXPECTED_MANIFEST_SHA256"
+          python -B scripts/knowledge_release.py lock \
+            --manifest candidate/manifest.json \
+            --output candidate/KNOWLEDGE_LOCK \
+            --source-commit "$SOURCE_COMMIT" \
+            --database-sha256 "$EXPECTED_DB_SHA256" \
+            --manifest-sha256 "$EXPECTED_MANIFEST_SHA256"
+      - name: Publish per-commit release assets without replacement
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ needs.build-and-test.outputs.source_commit }}
+          EXPECTED_DB_SHA256: ${{ needs.build-and-test.outputs.db_sha256 }}
+          EXPECTED_MANIFEST_SHA256: ${{ needs.build-and-test.outputs.manifest_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="knowledge-$SOURCE_COMMIT"
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            assets="$(gh release view "$tag" --repo "$GH_REPO" --json assets)"
+            DB_SHA="$EXPECTED_DB_SHA256" MANIFEST_SHA="$EXPECTED_MANIFEST_SHA256" python -c 'import json,os,sys; a={x["name"]:x for x in json.load(sys.stdin)["assets"]}; assert a["exteracontext.sqlite"].get("digest")=="sha256:"+os.environ["DB_SHA"]; assert a["manifest.json"].get("digest")=="sha256:"+os.environ["MANIFEST_SHA"]' <<< "$assets"
+          else
+            gh release create "$tag" candidate/exteracontext.sqlite candidate/manifest.json \
+              --repo "$GH_REPO" --title "Knowledge $SOURCE_COMMIT" \
+              --notes "Immutable-by-content-hash ExteraContext Knowledge database built from exact source commit $SOURCE_COMMIT after full project tests. Do not replace assets; KNOWLEDGE_LOCK pins both hashes."
+          fi
+      - name: Open PR advancing KNOWLEDGE_LOCK on develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_COMMIT: ${{ needs.build-and-test.outputs.source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          short="${SOURCE_COMMIT:0:12}"
+          branch="knowledge/update-$short"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp candidate/KNOWLEDGE_LOCK KNOWLEDGE_LOCK
+          git checkout -b "$branch"
+          git add KNOWLEDGE_LOCK
+          git commit -m "chore(knowledge): pin tested corpus $SOURCE_COMMIT"
+          git push --force-with-lease origin "$branch"
+          gh pr create --repo "$GH_REPO" --base develop --head "$branch" \
+            --title "chore(knowledge): advance tested corpus to $short" \
+            --body "Candidate built from exact ExteraContext-Knowledge commit $SOURCE_COMMIT in an unprivileged no-network container. Full Python, regression, benchmark, and MCP tests passed against this database. Per-commit release assets are hash-pinned in KNOWLEDGE_LOCK. Review the lock and release checksums before merge."
