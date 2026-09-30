@@ -47,6 +47,8 @@ with tempfile.TemporaryDirectory() as td:
             "evidence_status": "code",
             "evidence_type": "source",
             "source_type": "official-sdk",
+            "client": "ExteraGram", "platform": "Android",
+            "client_version": "12.10.1", "sdk_version": "1.4.5.5",
             "repository": "exteraSquad/plugins-pysdk-builds",
             "commit": "abc123",
             "path": "base_plugin.py",
@@ -101,7 +103,7 @@ with tempfile.TemporaryDirectory() as td:
         verifier_run_id=verifier,
         claim_id=claim,
         statement="The hook callback exposes an account parameter for the triggering send operation.",
-        scope={"client": "ExteraGram", "client_version": "12.10.1", "sdk_version": "1.4.5.5"},
+        scope={"client": "ExteraGram", "platform": "Android", "client_version": "12.10.1", "sdk_version": "1.4.5.5"},
         evidence_status="code",
         uncertainty="Source evidence only; runtime behavior is not proven.",
         db_path=db,
@@ -162,14 +164,17 @@ with tempfile.TemporaryDirectory() as td:
         api_symbol="on_send_message_hook",
         client="ExteraGram",
         platform="Android",
-        evidence=[{"source_type": "target-code", "repository": "example/plugin", "path": "plugin.py", "lines": "40-45"}],
+        client_version="12.10.1",
+        sdk_version="1.4.5.5",
+        evidence=[{"source_type": "target-code", "repository": "example/plugin", "path": "plugin.py", "lines": "40-45",
+                   "client": "ExteraGram", "platform": "Android", "client_version": "12.10.1", "sdk_version": "1.4.5.5"}],
         db_path=db,
     )
     ks.phase_a(
         verifier_run_id=verifier2,
         claim_id=dup,
         statement="The plugin usage independently shows the outgoing hook receiving account.",
-        scope={"client": "ExteraGram"},
+        scope={"client": "ExteraGram", "platform": "Android", "client_version": "12.10.1", "sdk_version": "1.4.5.5"},
         evidence_status="code",
         db_path=db,
     )
@@ -198,14 +203,16 @@ with tempfile.TemporaryDirectory() as td:
         client="ExteraGram",
         platform="Android",
         client_version="12.11-beta",
-        evidence=[{"source_type": "target-code", "path": "beta.py", "excerpt": "def on_send_message_hook(self, params): ..."}],
+        sdk_version="1.4.5.5",
+        evidence=[{"source_type": "target-code", "path": "beta.py", "excerpt": "def on_send_message_hook(self, params): ...",
+                   "client": "ExteraGram", "platform": "Android", "client_version": "12.11-beta", "sdk_version": "1.4.5.5"}],
         db_path=db,
     )
     ks.phase_a(
         verifier_run_id=verifier3,
         claim_id=conflict_claim,
         statement="The supplied beta source shows a different callback signature without account.",
-        scope={"client": "ExteraGram", "client_version": "12.11-beta"},
+        scope={"client": "ExteraGram", "platform": "Android", "client_version": "12.11-beta", "sdk_version": "1.4.5.5"},
         evidence_status="code",
         db_path=db,
     )
@@ -229,6 +236,7 @@ with tempfile.TemporaryDirectory() as td:
         [sys.executable, str(SCRIPTS / "query.py"), "api", "on_send_message_hook", "--format", "json"],
         env=env,
         text=True,
+        encoding="utf-8",
     )
     query_rows = json.loads(output)
     assert any(x["id"] == f"knowledge:{claim}" for x in query_rows), query_rows

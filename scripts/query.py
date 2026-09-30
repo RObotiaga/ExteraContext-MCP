@@ -300,10 +300,7 @@ def dynamic_fact(d: dict[str, Any], q: str) -> dict[str, Any]:
 
 
 def search_dynamic_facts(q: str, limit: int = 12) -> list[dict[str, Any]]:
-    try:
-        rows = ks.search_verified(q, max(limit * 2, 20))
-    except Exception:
-        return []
+    rows = ks.search_verified(q, max(limit * 2, 20))
     out = [dynamic_fact(r, q) for r in rows]
     out.sort(key=lambda x: x.get("score", 0), reverse=True)
     return out[:limit]
@@ -402,10 +399,7 @@ def api_lookup(symbol: str, limit: int = 30) -> list[dict[str, Any]]:
         d["score"] = STATUS_SCORE.get(d.get("status", ""), 0) + source_bonus(d.get("source_id", "")) + (4 if symbol.lower() in (d.get("api") or "").lower() else 0)
         d["directness"] = directness(d.get("source_id", ""))
     out.sort(key=lambda x: x["score"], reverse=True)
-    try:
-        dyn = [dynamic_fact(r, symbol) for r in ks.api_search(symbol, limit)]
-    except Exception:
-        dyn = []
+    dyn = [dynamic_fact(r, symbol) for r in ks.api_search(symbol, limit)]
     merged = sorted(out + dyn, key=lambda x: x.get("score", 0), reverse=True)
     return merged[:limit]
 
@@ -438,17 +432,79 @@ def emit_fact(f: dict[str, Any], i: int) -> str:
     )
 
 
+# A version is evidence only when attached to a precise field, not when the same
+# digits occur in a commit, prose about a future SDK, or a different version.
+_VERSION_LABEL = {
+    "client": re.compile(r"(?<![\w])(?:client|app)\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)(?![\w.])", re.I),
+    "sdk": re.compile(r"(?<![\w])(?:sdk|elyx)\s+(\d+(?:\.\d+)+(?:[-+][\w.]+)?)(?![\w.])", re.I),
+}
+
+
+def _version_relation(fact: dict[str, Any], field: str, requested: str | None) -> str:
+    if not requested:
+        return "not-requested"
+    structured = fact.get(field + "_version")
+    if structured:
+        return "match" if structured == requested else "mismatch"
+    labels = _VERSION_LABEL[field].findall(fact.get("version") or "")
+    if not labels:
+        return "unknown"
+    return "match" if requested in labels else "mismatch"
+
+
+def _explicit_donor_lookup(q: str, pool: list[dict[str, Any]]) -> bool:
+    # Naming a donor client or a concrete donor-only symbol is intentional.
+    low = q.lower()
+    if any(re.search(r"(?<![a-z])" + re.escape(name) + r"[a-z0-9]*(?![a-z])", low)
+           for name in DONOR_PREFIXES):
+        return True
+    identifiers = {x.lower() for x in re.findall(r"\b[A-Za-z_][A-Za-z0-9_.]*\b", q)
+                   if len(x) >= 5 and ("_" in x or "." in x or any(c.isupper() for c in x[1:]))}
+    identifiers -= COMMON_CROSS_CLIENT_IDENTIFIERS
+    return any(f.get("directness") == "donor" and
+               any(ident in (f.get("api") or "").lower() for ident in identifiers)
+               for f in pool)
+
+
+def _target_facts(q: str, target: str, client_version: str | None,
+                  sdk_version: str | None, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    target_client = "exteragram" in target.lower()
+    # Keep the historical top-k candidate set (including its dynamic overlay
+    # quota); a larger search changes that quota and loses proven benchmark hits.
+    pool = search_facts(q, limit=limit)
+    explicit_donor = _explicit_donor_lookup(q, pool)
+    if not target_client or explicit_donor:
+        return pool[:limit], explicit_donor
+    for fact in pool:
+        client_match = _version_relation(fact, "client", client_version)
+        sdk_match = _version_relation(fact, "sdk", sdk_version)
+        fact["target_version_match"] = {"client": client_match, "sdk": sdk_match}
+        # Unknown versions remain unknown, never promoted to compatible.
+        # Explicit versions break close ties, but must not displace stronger
+        # historical official evidence merely because its version is unstated.
+        match_bonus = 0.25 * (client_match == "match") + 0.25 * (sdk_match == "match")
+        mismatch_penalty = 4 * (client_match == "mismatch") + 4 * (sdk_match == "mismatch")
+        donor_penalty = 7 if fact.get("directness") == "donor" else 0
+        fact["target_rank_score"] = fact["score"] + match_bonus - mismatch_penalty - donor_penalty
+    pool.sort(key=lambda f: f["target_rank_score"], reverse=True)
+    return pool[:limit], False
+
+
 def context_packet(q: str, target: str, client_version: str | None, sdk_version: str | None, limit: int) -> dict[str, Any]:
-    facts = search_facts(q, limit=limit)
+    facts, explicit_donor = _target_facts(q, target, client_version, sdk_version, limit)
     recipes = search_docs(q, limit=4, kind="recipe")
     topics = search_docs(q, limit=4, kind="topic")
     api_candidates = []
+    donor_api_candidates = []
     seen = set()
     for f in facts:
         api = (f.get("api") or "").strip()
         if api and api != "—" and api not in seen:
             seen.add(api)
-            api_candidates.append(api)
+            if f.get("directness") == "donor" and not explicit_donor and "exteragram" in target.lower():
+                donor_api_candidates.append(api)
+            else:
+                api_candidates.append(api)
         if len(api_candidates) >= 8:
             break
     direct = [f for f in facts if f.get("directness") in {"official", "target-ecosystem"} and f.get("status") not in {"unavailable", "secondary"}]
@@ -462,16 +518,23 @@ def context_packet(q: str, target: str, client_version: str | None, sdk_version:
         warnings.append("В агентской базе есть конфликтующее подтверждённое наблюдение; не выбирайте одну сторону без проверки target/version и evidence trail.")
     if not direct and donors:
         warnings.append("Прямых доказательств ExteraGram для этой задачи не найдено; найденные доноры использовать только как архитектурные ориентиры.")
-    if client_version:
-        warnings.append(f"Фильтрация по версии клиента {client_version} пока эвристическая: сравнивайте поле version каждого факта и compatibility.md.")
-    if sdk_version:
-        warnings.append(f"Фильтрация по SDK {sdk_version} пока эвристическая: нижние версии отдельных API могут отличаться от baseline документации.")
+    if explicit_donor and "exteragram" in target.lower():
+        warnings.append("Явный запрос донорского символа: результаты доноров сохранены для справки, не подтверждают поддержку ExteraGram.")
+    if donor_api_candidates:
+        warnings.append("Донорские API-кандидаты вынесены отдельно и не подтверждают поддержку целевого клиента.")
+    if client_version or sdk_version:
+        warnings.append("Совпадение версии учитывается только по точной метке client/app или SDK/Elyx; отсутствие метки означает unknown, не совместимость.")
+        if any("mismatch" in f.get("target_version_match", {}).values() for f in facts):
+            warnings.append("Некоторые факты содержат явно несовпадающую версию; они понижены в выдаче, но оставлены как контекст.")
+        if not any("match" in f.get("target_version_match", {}).values() for f in facts):
+            warnings.append("Точных подтверждений запрошенной версии в выдаче нет; поддержку целевой сборки считать неизвестной.")
     return {
         "query": q,
         "target": target,
         "client_version": client_version,
         "sdk_version": sdk_version,
         "api_candidates": api_candidates,
+        "donor_api_candidates": donor_api_candidates,
         "facts": facts,
         "recipes": [{"path": d["path"], "title": d["title"], "excerpt": clip(d["content"], 900)} for d in recipes],
         "topics": [{"path": d["path"], "title": d["title"], "excerpt": clip(d["content"], 700)} for d in topics],
@@ -493,6 +556,9 @@ def render_context_md(p: dict[str, Any]) -> str:
         lines.extend(f"- `{x}`" for x in p["api_candidates"])
     else:
         lines.append("- Явных API-кандидатов не найдено.")
+    if p.get("donor_api_candidates"):
+        lines += ["", "## Донорские API (не подтверждены для целевого клиента)"]
+        lines.extend(f"- `{x}`" for x in p["donor_api_candidates"])
     lines += ["", "## Доказательства"]
     if p["facts"]:
         for i, f in enumerate(p["facts"], 1):
@@ -548,10 +614,7 @@ def command_recipe(args: argparse.Namespace) -> None:
 
 def command_evidence(args: argparse.Namespace) -> None:
     knowledge_key = args.key[len("knowledge:"):] if args.key.startswith("knowledge:") else args.key
-    try:
-        kclaim = ks.get_claim(knowledge_key)
-    except Exception:
-        kclaim = None
+    kclaim = ks.get_claim(knowledge_key)
     if kclaim:
         if args.format == "json":
             print(json.dumps(kclaim, ensure_ascii=False, indent=2))
@@ -619,10 +682,7 @@ def command_doctor(args: argparse.Namespace) -> None:
     meta["runtime_verified"] = runtime
     meta["direct_ecosystem_facts"] = direct
     meta["db"] = str(DB)
-    try:
-        meta["agent_knowledge"] = ks.stats()
-    except Exception as e:
-        meta["agent_knowledge"] = {"error": str(e)}
+    meta["agent_knowledge"] = ks.stats()
     print(json.dumps(meta, ensure_ascii=False, indent=2))
 
 

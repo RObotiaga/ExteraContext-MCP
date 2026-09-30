@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,8 +33,36 @@ def cmd_init(args):
     dump({"db": str(ks.init_db())})
 
 
+def require_runtime_attestation(args) -> str:
+    """Authenticate a machine-only invocation; neither role nor caller metadata is authority."""
+    source = os.environ.get("EXTERACONTEXT_RUNTIME_SOURCE", "")
+    secret = os.environ.get("EXTERACONTEXT_RUNTIME_TOKEN", "")
+    if not source.strip() or source != source.strip() or len(secret) < 32:
+        raise ValueError("runtime attestation is not configured (EXTERACONTEXT_RUNTIME_SOURCE and EXTERACONTEXT_RUNTIME_TOKEN)")
+    token = args.attestation_token
+    if getattr(args, "attestation_token_stdin", False) or token == "-":
+        token = sys.stdin.readline().strip()
+    if not args.runtime_source or not token or not (
+        secrets.compare_digest(args.runtime_source, source)
+        and secrets.compare_digest(token, secret)
+    ):
+        raise ValueError("invalid runtime attestation")
+    return source
+
+
+def reject_unattested_runtime_status(status: str) -> None:
+    if status == "runtime-verified":
+        raise ValueError("runtime-verified requires an attested machine runtime result")
+
+
 def cmd_run_create(args):
-    rid = ks.create_run(args.role, args.model, args.task_id, args.session_id, load_json_arg(args.metadata, {}))
+    metadata = load_json_arg(args.metadata, {})
+    if args.role == "runtime":
+        source = require_runtime_attestation(args)
+        if not isinstance(metadata, dict):
+            raise ValueError("runtime metadata must be a JSON object")
+        metadata = {**metadata, "attested_runtime_source": source}
+    rid = ks.create_run(args.role, args.model, args.task_id, args.session_id, metadata)
     dump({"run_id": rid, "role": args.role})
 
 
@@ -61,18 +91,25 @@ def _evidence_from_args(args) -> list[dict[str, Any]]:
 
 
 def cmd_propose(args):
+    reject_unattested_runtime_status(args.evidence_status)
+    evidence = _evidence_from_args(args)
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("evidence must contain JSON objects")
+        reject_unattested_runtime_status(item.get("evidence_status"))
     duplicates = ks.find_duplicates(args.claim, 5)
     cid = ks.propose_claim(
         run_id=args.run_id, statement=args.claim, kind=args.kind, scope=args.scope,
         evidence_status=args.evidence_status, api_symbol=args.api,
         client=args.client, platform=args.platform, client_version=args.client_version,
         sdk_version=args.sdk_version, language=args.language, plugin_format=args.plugin_format,
-        evidence=_evidence_from_args(args),
+        evidence=evidence,
     )
     dump({"claim_id": cid, "state": "candidate", "preexisting_matches": duplicates})
 
 
 def cmd_phase_a(args):
+    reject_unattested_runtime_status(args.evidence_status)
     vid = ks.phase_a(
         verifier_run_id=args.run_id, claim_id=args.claim_id,
         statement=args.statement, scope=load_json_arg(args.scope_json, {}),
@@ -110,12 +147,34 @@ def cmd_add_evidence(args):
 
 
 def cmd_runtime(args):
+    source = require_runtime_attestation(args)
+    if args.subject_type != "claim":
+        raise ValueError("legacy_fact runtime attestation has no trustworthy target binding; refused")
+    claim = ks.get_claim(args.subject_id)
+    if claim is None or claim["state"] not in {"verified", "conflicting"}:
+        raise ValueError("runtime result requires an existing trusted claim")
+    for field in ("client", "platform", "client_version", "sdk_version"):
+        if getattr(args, field) != claim[field]:
+            raise ValueError(f"runtime target mismatch: {field}")
+    # A guessed run id or a user-created runtime role is not a capability.
+    con = ks.connect()
+    try:
+        run = con.execute("SELECT role, metadata_json FROM knowledge_runs WHERE id=?", (args.run_id,)).fetchone()
+    finally:
+        con.close()
+    if run is None or run["role"] != "runtime" or json.loads(run["metadata_json"]).get("attested_runtime_source") != source:
+        raise ValueError("runtime run was not created by the attested source")
+    if args.runs < 1 or not args.test_id.strip():
+        raise ValueError("runtime runs and test_id must be positive and nonempty")
+    metadata = load_json_arg(args.metadata, {})
+    if not isinstance(metadata, dict):
+        raise ValueError("runtime metadata must be a JSON object")
     eid = ks.record_runtime_result(
         run_id=args.run_id, subject_type=args.subject_type, subject_id=args.subject_id,
         passed=args.result == "pass", test_id=args.test_id, runs=args.runs,
         client=args.client, platform=args.platform, client_version=args.client_version,
         sdk_version=args.sdk_version, log_excerpt=args.log_excerpt,
-        metadata=load_json_arg(args.metadata, {}),
+        metadata={**metadata, "attested_runtime_source": source},
     )
     dump({"evidence_id": eid, "runtime_result": args.result})
 
@@ -158,6 +217,12 @@ def add_evidence_args(p):
     p.add_argument("--excerpt")
 
 
+def add_attestation_args(p):
+    p.add_argument("--runtime-source", help="machine source id matching EXTERACONTEXT_RUNTIME_SOURCE")
+    p.add_argument("--attestation-token", help="machine-only secret matching EXTERACONTEXT_RUNTIME_TOKEN")
+    p.add_argument("--attestation-token-stdin", action="store_true", help="read attestation token from stdin")
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Append-only ExteraContext knowledge write-back")
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -171,6 +236,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--task-id")
     s.add_argument("--session-id")
     s.add_argument("--metadata", help="JSON or @file")
+    add_attestation_args(s)
     s.set_defaults(func=cmd_run_create)
 
     s = sp.add_parser("propose", help="Collector creates a candidate claim")
@@ -223,6 +289,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--log-excerpt")
     s.add_argument("--metadata", help="JSON or @file")
     add_target_args(s)
+    add_attestation_args(s)
     s.set_defaults(func=cmd_runtime)
 
     s = sp.add_parser("show", help="Show a claim with evidence/verifications/conflicts")

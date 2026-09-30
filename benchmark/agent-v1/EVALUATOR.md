@@ -1,43 +1,13 @@
-# Evaluator procedure
+# Evaluator procedure — protocol 1.1
 
-The evaluator runs outside the tested agent context.
+The evaluator is independent of the tested agent. Keep `ground-truth.json`, assessments and previous runs out of tested-agent sessions. The tested agent's `BENCHMARK_RESULT.json` is a self-report, not independent proof.
 
-For each run:
+1. Inspect the actual patch/final answer, target/build/runtime logs and that task's private ground-truth entry. Record `protocol_version: "1.1"`, `assessment_schema_version: 2`, manifest `run_id`, and `pilot: false` for a fresh run.
+2. For **each** `must_handle` ground-truth constraint, record an ordered `{constraint, passed, evidence}` verdict. `constraints_handled` is true **only** if every verdict passes; a UI callback on a worker thread fails `UI-thread return` even if other constraints pass. Empty constraint lists yield true but do not imply material completion.
+3. `correct_unknown` is boolean **only** for `version-sensitive-symbol`, `donor-ayufilter`, and `unsupported-teleport`; set null for all other implementation tasks. Do not reward a closed-book baseline for merely declining implementation.
+4. Independently distinguish `python_compile_success` (syntax), `target_static_success` (actual target integration/static checks), `load_success` and `runtime_success`. Unavailable checks are null, never assumed successful; compiling generic Python does not prove target integration.
+5. `validate_result.py TARGET/BENCHMARK_RESULT.json` checks claimed PASS tests for command or existing local artifact. A command is reproducibility metadata, **not** proof it ran. Inspect/run the command or log yourself before marking a reported test verified; record unverified claims as `verified: false`. Verified PASS needs a reproducible command and/or an existing in-run `artifact_path`; never follow paths outside the run.
+6. Set `clean_success=true` only if material completion, all constraints, target evidence boundaries, and correct-unknown where applicable succeed, with no invented target API, donor contamination, version mismatch or task-specific hard failure. Validate with `scoring.check_assessment`; do not infer runtime success from static checks.
+7. Save `assessment.json` alongside the run, then aggregate only new non-pilot protocol 1.1/schema 2 records. The old v1-001 assessment is a pilot and must be rerun, not treated as an A/B/C sample.
 
-1. Read the task from `tasks.json`.
-2. Read only that task's entry in `ground-truth.json`.
-3. Inspect the actual final answer/patch and any build/test/runtime evidence.
-4. Read `BENCHMARK_RESULT.json`, but treat it as agent self-report rather than ground truth.
-5. Create `assessment.json` matching `assessment.schema.json`.
-
-## Clean success
-
-Set `clean_success=true` only when:
-
-- `materially_completed=true`;
-- `invented_api=false`;
-- `donor_contamination=false`;
-- `version_mismatch=false`;
-- `constraints_handled=true`;
-- evidence boundaries are correct;
-- for a correct-unknown task, `correct_unknown=true`.
-
-For implementation tasks where runtime infrastructure is unavailable, `runtime_success` may be null. Do not convert a static-only pass into runtime success.
-
-## Hard failures
-
-A ground-truth `hard_fail` condition forces `clean_success=false` even if the produced code looks plausible.
-
-Examples include:
-
-- fabricated target API;
-- donor API promoted to ExteraGram;
-- exact-version compatibility inferred from generic evidence;
-- callback account replaced by the currently selected UI account;
-- reload-sensitive registration with no cleanup.
-
-## Blinding
-
-Do not let evaluator notes, ground truth, or assessments enter any later tested-agent session.
-
-If an evaluator is an LLM, use a fresh evaluator context and do not use the same context that generated the candidate solution.
+B needs a verified read-only checkout of Knowledge at `70f6f614227c8b02d241e7b1e72a0b6691442fd1`. C needs a pinned, locally verified base SQLite and isolated run-local mutable SQLite, with auto-sync disabled offline. Follow `RESOURCE_SETUP.md` before manually launching a device run.

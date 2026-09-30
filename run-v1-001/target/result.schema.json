@@ -98,11 +98,8 @@
           },
           "details": {
             "type": "string"
-          },
-          "command": {"type": "string", "minLength": 1},
-          "artifact_path": {"type": "string", "minLength": 1}
-        },
-        "allOf": [{"if": {"properties": {"status": {"const": "pass"}}, "required": ["status"]}, "then": {"anyOf": [{"required": ["command"]}, {"required": ["artifact_path"]}]}}]
+          }
+        }
       }
     },
     "tool_calls": {
