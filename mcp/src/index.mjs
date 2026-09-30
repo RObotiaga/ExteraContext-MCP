@@ -6,6 +6,7 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { buildServer } from './server.mjs';
+import { VERSION } from './version.mjs';
 
 function parseArgs(argv) {
   const out = { transport: 'stdio', host: '127.0.0.1', port: 7357, path: '/mcp', modernOnly: false, responseMode: 'auto' };
@@ -29,7 +30,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  return `ExteraContext MCP 0.6.1\n\n` +
+  return `ExteraContext MCP ${VERSION}\n\n` +
     `Usage:\n` +
     `  node mcp/src/index.mjs --transport stdio [--modern-only]\n` +
     `  node mcp/src/index.mjs --transport http [--host 127.0.0.1] [--port 7357] [--path /mcp] [--modern-only] [--response-mode auto|json|sse]\n\n` +
@@ -60,7 +61,7 @@ async function main() {
   }
 
   if (!['127.0.0.1', '::1', 'localhost'].includes(args.host)) {
-    throw new Error('HTTP transport is loopback-only in v0.6.1. Put a trusted reverse proxy/auth layer in front instead of binding ExteraContext directly to a public interface.');
+    throw new Error(`HTTP transport is loopback-only in ${VERSION}. Put a trusted reverse proxy/auth layer in front instead of binding ExteraContext directly to a public interface.`);
   }
 
   // Explicit secret is mandatory for HTTP; stdio has no bearer requirement.

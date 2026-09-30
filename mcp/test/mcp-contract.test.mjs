@@ -9,6 +9,17 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
 
 async function text(path) { return readFile(resolve(root, path), 'utf8'); }
+const packageMetadata = JSON.parse(await text('mcp/package.json'));
+
+test('CLI help and errors report the package version', () => {
+  const help = spawnSync(process.execPath, [resolve(root, 'mcp/src/index.mjs'), '--help'], { encoding: 'utf8' });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, new RegExp(`ExteraContext MCP ${packageMetadata.version}`));
+
+  const invalidHost = spawnSync(process.execPath, [resolve(root, 'mcp/src/index.mjs'), '--transport', 'http', '--host', '0.0.0.0'], { encoding: 'utf8' });
+  assert.notEqual(invalidHost.status, 0);
+  assert.match(invalidHost.stderr, new RegExp(`loopback-only in ${packageMetadata.version}`));
+});
 
 test('MCP entry uses 2026-era official serving APIs', async () => {
   const source = await text('mcp/src/index.mjs');

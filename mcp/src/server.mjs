@@ -1,14 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeError, compactTarget, jsonArg, runPythonJson, targetLabel } from './bridge.mjs';
-
-const VERSION = '0.6.1';
+import { VERSION } from './version.mjs';
 
 // Keep JSON carried in a single Python argv bounded well below the bridge's
 // 256 KiB total-argument ceiling. Measure bytes, not JS UTF-16 code units.
 function jsonWithinBytes(value, limit) {
   return Buffer.byteLength(JSON.stringify(value), 'utf8') <= limit;
 }
+
+// issue_actor() emits `kc_col_`/`kc_ver_` plus secrets.token_urlsafe(32),
+// whose alphabet is exactly base64url and whose length is 43 characters.
+// The bounded superset preserves that format while rejecting oversized/non-token input pre-queue.
+const ActorTokenSchema = z.string().min(16).max(256)
+  .regex(/^[A-Za-z0-9_-]{16,256}$/)
+  .refine(token => Buffer.byteLength(token, 'utf8') <= 256, 'Actor token exceeds 256 UTF-8 bytes');
 
 const TargetSchema = z.object({
   client: z.string().nullable().optional(),
@@ -391,7 +397,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Persist a collector candidate using the one-time MCP-issued collector capability token, then issue a verifier capability token and blind Phase-A prompt. DSH child IDs are optional provenance, not authorization.',
     inputSchema: z.object({
       orchestration_id: z.string().min(1),
-      actor_token: z.string().min(16),
+      actor_token: ActorTokenSchema,
       result: CollectorResultSchema,
       model: z.string().optional(),
       runtime_actor: RuntimeActorSchema.optional()
@@ -410,7 +416,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Persist the independent blind extraction with the MCP-issued verifier capability token. The collector candidate is revealed only after this transition.',
     inputSchema: z.object({
       orchestration_id: z.string().min(1),
-      actor_token: z.string().min(16),
+      actor_token: ActorTokenSchema,
       result: PhaseAResultSchema,
       model: z.string().optional(),
       runtime_actor: RuntimeActorSchema.optional()
@@ -429,7 +435,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Submit the comparison verdict using the same verifier capability token used for Phase A. If runtime child identity was supplied in Phase A, matching identity is required here. SQLite guards remain the final promotion gate.',
     inputSchema: z.object({
       orchestration_id: z.string().min(1),
-      actor_token: z.string().min(16),
+      actor_token: ActorTokenSchema,
       result: PhaseBResultSchema,
       runtime_actor: RuntimeActorSchema.optional()
     }),
