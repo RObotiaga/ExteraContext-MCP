@@ -1,8 +1,8 @@
-# ExteraContext v0.6.1 MCP — DeepSeek Harness regression test
+# ExteraContext MCP v0.7.0 — DeepSeek Harness regression test
 
 Use the installed `exteracontext` skill and the `mcp__exteracontext__*` tools for this task. Follow the retrieval and new-knowledge rules exactly. Use CLI scripts only if an MCP tool is unavailable.
 
-Target: ExteraGram Android. Determine the exact supported way to intercept an outgoing message before send, preserve the triggering account, and avoid duplicated hooks after plugin reload. Prefer public PySDK APIs over Java/Xposed internals when evidence supports them.
+Target: ExteraGram Android. First call `doctor` and record the actual MCP server version and protocol revision; this prompt targets v0.7.0, so a different deployed version must be reported as a mismatch rather than assumed to be v0.7.0. Determine the exact supported way to intercept an outgoing message before send, preserve the triggering account, and avoid duplicated hooks after plugin reload. Prefer public PySDK APIs over Java/Xposed internals when evidence supports them.
 
 Requirements:
 1. Resolve target/version from the workspace when available; keep unknown versions unknown.

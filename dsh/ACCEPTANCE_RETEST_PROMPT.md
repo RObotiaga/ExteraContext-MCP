@@ -1,10 +1,10 @@
-# ExteraContext v0.6.1 — acceptance regression test
+# ExteraContext MCP v0.7.0 — acceptance regression test
 
 Run this in a fresh DeepSeek Harness session with ExteraContext MCP configured in `--modern-only` mode. Do not use the ExteraContext CLI, direct SQLite access, or direct reads of `data/wiki` to answer the test.
 
 ## 1. Connectivity and UTF-8
 
-1. Call `doctor` and confirm `protocol_era=modern`, `protocol_revision=2026-07-28`, and server version `0.6.1`.
+1. Call `doctor` and confirm `protocol_era=modern`, `protocol_revision=2026-07-28`, and server version `0.7.0` (the MCP package/server version). Record the actual version returned by the deployed instance; a mismatch is a FAIL for this v0.7.0 acceptance run.
 2. Call `get_recipe` with a query containing exactly: `cleanup → reload русский`.
 3. Treat any `UnicodeEncodeError`, mojibake such as `����`, or loss/change of `→` as FAIL.
 
@@ -66,4 +66,4 @@ After a full Harness + MCP restart, run a fresh session and retrieve the sentine
 
 Final marker:
 
-`EXTERACONTEXT_MCP_V061_TEST_COMPLETE`
+`EXTERACONTEXT_MCP_V070_TEST_COMPLETE`

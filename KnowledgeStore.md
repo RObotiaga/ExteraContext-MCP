@@ -1,6 +1,6 @@
 # ExteraContext Knowledge Store
 
-`data/knowledge.sqlite` is the mutable, append-oriented engineering memory (the **overlay**). It is intentionally separate from `data/exteracontext.sqlite`, the deployed **immutable base** corpus index. Retrieval merges the two; read-only queries must neither create/migrate the overlay nor modify the base. Initialize or restore the overlay explicitly for writes; keep separate backups and access controls for both. The base is not built, downloaded, or refreshed by ordinary offline deployment. See [production readiness](docs/PRODUCTION_READINESS.md) for offline bootstrap and release controls.
+`data/knowledge.sqlite` is the mutable, append-oriented engineering memory (the **overlay**). It is intentionally separate from `data/exteracontext.sqlite`, the deployed **immutable base** corpus index. Retrieval merges the two; read-only queries must neither create/migrate the overlay nor modify the base. Initialize or restore the overlay explicitly for writes; keep separate backups and access controls for both. Ordinary operation with `EXTERACONTEXT_AUTO_SYNC` unset or `0` is offline/no-network. An explicit `EXTERACONTEXT_AUTO_SYNC=1` invokes the trusted updater, subject to the lock and publication controls below. See [production readiness](docs/PRODUCTION_READINESS.md) for offline bootstrap and release controls.
 
 ## Trust boundary
 
@@ -24,6 +24,14 @@ Legacy review is classified as `independent-source-reread-nonblind`: reviewers w
 - it is not treated as equivalent to the blind two-phase verifier required for newly written trusted claims.
 
 Use `python scripts/query.py evidence <fact-id>` to see this provenance for a legacy fact.
+
+## Immutable base update and publication trust
+
+With `EXTERACONTEXT_AUTO_SYNC` unset or `0`, retrieval and the updater perform no network access. Setting `EXTERACONTEXT_AUTO_SYNC=1` explicitly invokes `scripts/update_knowledge.py`. That updater is restricted to fetching hash-pinned `exteracontext.sqlite` and `manifest.json` release assets from the fixed repository `RObotiaga/ExteraContext-MCP`; it validates the lock asset hashes, manifest source commit, schema/counts and SQLite integrity before staging deployment. It never clones or executes code from the separate Knowledge repository. SHA-256 pins prove downloaded-byte integrity relative to the reviewed lock, not the trustworthiness of GitHub, TLS, repository administration or reviewers.
+
+The daily/manual `.github/workflows/sync-knowledge.yml` workflow checks the exact `main` commit of `RObotiaga/ExteraContext-Knowledge`, builds a candidate in an unprivileged, networkless container, and runs all test suites against it. Its publisher waits for the protected GitHub Actions environment `knowledge-publish`; a repository administrator must configure a required reviewer. Following approval it publishes per-commit release assets and opens a pull request to `develop` containing the updated `KNOWLEDGE_LOCK`; there is no direct push to `main`. The lock is usable only once that PR is reviewed/merged and its corresponding release assets exist. The Actions runner still needs network access for checkout and packages/services even though the candidate-build container is networkless.
+
+The current `KNOWLEDGE_LOCK` is a legacy bare SHA with no artifact hashes, so the updater intentionally fails closed. Do not set `EXTERACONTEXT_AUTO_SYNC=1` expecting a successful update until the first candidate passes protected publication, the lock PR is merged, and the matching release exists. No workflow run or updater fetch was performed as part of this documentation task.
 
 ## Tables
 
@@ -120,7 +128,7 @@ The conflicting candidate becomes searchable with an explicit `conflicting` life
 
 ## MCP capability actors
 
-The MCP orchestration layer cannot assume that a host such as DeepSeek Harness exposes internal child-run IDs. v0.6.1 therefore separates **authorization identity** from optional **runtime provenance**:
+The MCP orchestration layer cannot assume that a host such as DeepSeek Harness exposes internal child-run IDs. MCP v0.7.0 therefore separates **authorization identity** from optional **runtime provenance**:
 
 - `reflect_on_task` creates a collector capability actor and returns a one-time collector token;
 - collector submission consumes that token and creates a different verifier capability actor/token;

@@ -11,7 +11,7 @@ Extract/copy this whole bundle to one of the filesystem skill roots. For a proje
 The entire ExteraContext directory (scripts/data/docs/tests) must stay beside `SKILL.md`, because the skill executes local scripts by relative path. Harness also scans `<project>/.agents/skills`, `~/.dsh/skills`, and `~/.agents/skills`.
 
 
-ExteraContext v0.6.1 uses Harness native subagents for knowledge verification and exposes the Knowledge Core itself as a real MCP server.
+ExteraContext MCP v0.7.0 uses Harness native subagents for knowledge verification and exposes the Knowledge Core itself as a real MCP server.
 The main agent owns orchestration state; DSH owns actual child isolation.
 
 ## Connect the ExteraContext MCP server
@@ -31,7 +31,7 @@ See `dsh/MCP_STRICT_MODERN_TEST.md` for the first conformance smoke test.
 
 ## Required capabilities
 
-Use a fresh collector child and an independently launched verifier for Phase A. A continuable verifier is preferred when Harness exposes a continuation handle, but v0.6.1 no longer depends on a child ID being visible to the main agent.
+Use a fresh collector child and an independently launched verifier for Phase A. A continuable verifier is preferred when Harness exposes a continuation handle, but MCP v0.7.0 does not depend on a child ID being visible to the main agent.
 
 The critical blind invariant is temporal: **Phase A must be persisted before the collector candidate is revealed in the Phase-B prompt.** ExteraContext enforces that boundary in its state machine.
 
@@ -71,4 +71,4 @@ Success criteria:
 - `python scripts/query.py search '<new claim phrase>'` retrieves an accepted claim;
 - existing retrieval benchmark remains green.
 
-See also `dsh/ACCEPTANCE_RETEST_PROMPT.md` for the v0.6.1 regression test.
+See also `dsh/ACCEPTANCE_RETEST_PROMPT.md` for the acceptance regression test.
