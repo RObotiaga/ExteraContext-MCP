@@ -1,4 +1,4 @@
-name: MCP CI
+name: MCP CI (offline knowledge)
 
 on:
   push:
@@ -13,6 +13,11 @@ permissions:
 jobs:
   integration:
     runs-on: ubuntu-latest
+    # Never collect/clone/sync the external corpus as part of ordinary CI.
+    # Corpus-dependent smoke, bridge and wire tests require a separately approved,
+    # locally provided corpus DB and are intentionally excluded here.
+    env:
+      EXTERACONTEXT_AUTO_SYNC: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,20 +26,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build pinned Knowledge database
-        run: python scripts/sync_knowledge.py
-      - name: Python regression suite
+      - name: Python offline regressions (temporary fixtures only)
         run: |
-          python tests/smoke.py
+          python tests/test_ci_offline.py --suite
           python tests/test_skill_contract.py
-          python tests/test_knowledge_writeback.py
-          python tests/test_orchestrator.py
           python benchmark/agent-v1/validate.py
-      - name: Install MCP SDK
-        working-directory: mcp
-        run: npm install --no-audit --no-fund
-      - name: MCP contract and wire tests
+      - name: MCP syntax and corpus-independent contract
         working-directory: mcp
         run: |
           npm run check
-          npm test
+          node --test test/mcp-contract.test.mjs

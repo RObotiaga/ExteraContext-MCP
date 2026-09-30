@@ -1,6 +1,6 @@
 {
   "name": "@exteracontext/mcp",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "MCP 2026-07-28 server for ExteraContext",

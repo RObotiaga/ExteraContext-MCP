@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 Q = ROOT / "scripts" / "query.py"
 
 def run(*args: str) -> str:
-    return subprocess.check_output([sys.executable, str(Q), *args], text=True)
+    return subprocess.check_output([sys.executable, str(Q), *args], text=True, encoding="utf-8")
 
 
 doctor = json.loads(run("doctor"))

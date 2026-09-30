@@ -11,7 +11,7 @@ Retrieve task-specific evidence from the bundled ExteraGram plugin-development w
 
 Use this order: resolve the target → split the task into retrieval concepts → fetch a task packet for each concept → verify every load-bearing external symbol → implement/review → capture reusable new knowledge.
 
-When ExteraContext MCP tools are registered, prefer them over shelling out to the CLI. In DeepSeek Harness the names are normally `mcp__exteracontext__resolve_target`, `mcp__exteracontext__search_knowledge`, `mcp__exteracontext__find_api`, and so on. The `scripts/*.py` commands documented below are the local/debug fallback and must preserve the same evidence semantics.
+When ExteraContext MCP tools are registered, prefer them over shelling out to the CLI. In DeepSeek Harness the names are normally `mcp__exteracontext__resolve_target`, `mcp__exteracontext__search_knowledge`, `mcp__exteracontext__find_api`, and so on. The `scripts/*.py` commands documented below are the local/debug fallback and must preserve the same evidence semantics. First verify the locally deployed base DB exists: missing data must not trigger an automatic download or corpus rebuild. For offline bootstrap of an **existing** approved SQLite corpus, see [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md); its manifest hashes the deployed copy but reports `commit_verified: false`, not a verified Knowledge commit pin. Keep `EXTERACONTEXT_AUTO_SYNC=0`.
 
 Keep each retrieval query to one concept. Split independent concerns such as outgoing hooks, account routing, UI threading, and cleanup into separate queries; combine them only when the interaction between those concerns is itself the subject. Prefer a small set of focused packets over loading the whole wiki.
 
@@ -71,7 +71,7 @@ Keep these meanings distinct in conclusions and code review:
 - `secondary`: community/radar claim.
 - `unavailable`: source could not be acquired.
 
-Successful build, source inspection, or README text does not become runtime verification.
+Successful build, source inspection, or README text does not become runtime verification. MCP `record_runtime_result` currently fails closed without trusted machine attestation; never send a user/model-provided PASS as device evidence. The machine-only CLI path is explicitly gated and carries an unresolved argv-secret exposure; see [`KnowledgeStore.md`](KnowledgeStore.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
 
 Legacy wiki facts may also carry collector/reviewer provenance from the original 2026-09-27 build. Treat that as `independent-source-reread-nonblind`: the reviewer was a separate fresh run and re-read primary material, but could see/edit the collector output. This strengthens auditability but does not upgrade `docs`/`code` to runtime evidence and is not equivalent to the blind Phase-A verifier used for new write-back.
 

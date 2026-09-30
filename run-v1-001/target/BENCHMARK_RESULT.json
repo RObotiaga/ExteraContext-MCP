@@ -1,0 +1,36 @@
+{
+  "benchmark": "exteracontext-agent-v1",
+  "task_id": "outgoing-account-lifecycle",
+  "mode": "A",
+  "repeat": 1,
+  "completed": true,
+  "summary": "Implemented outgoing message interception with account context preservation, background thread processing off the UI thread, safe UI thread dispatching, and clean lifecycle management preventing duplicate or stale hook registrations on disable/reload. Since Mode A baseline restricts evidence to target-local files and the fixture contains no host SDK symbols, generic architectural contracts were used and target uncertainties explicitly documented without inventing unverified APIs.",
+  "external_symbols": [],
+  "uncertainties": [
+    "The concrete ExteraGram 12.10.1 / SDK 1.4.5.5 API symbol and hook signature for intercepting outgoing text messages before send are not established by target-local evidence.",
+    "The account identification and preservation mechanism (e.g. AccountInstance reference, account ID integer, or context object in callback) cannot be verified from target-local files.",
+    "The target UI-thread dispatching mechanism (e.g. Android Looper/Handler vs proprietary SDK runner) is not established by target-local evidence.",
+    "The target plugin lifecycle registration and deregistration interfaces (e.g. host plugin manager callbacks vs dynamic hook unregistration) lack local documentation or fixture definitions."
+  ],
+  "files_changed": [
+    "plugin.py",
+    "BENCHMARK_RESULT.json"
+  ],
+  "tests": [
+    {
+      "name": "test_account_preservation_and_background_dispatch",
+      "status": "pass",
+      "details": "Verified account context is preserved and propagated from outgoing message event through background worker to UI callback."
+    },
+    {
+      "name": "test_lifecycle_no_stale_or_duplicate_registrations",
+      "status": "pass",
+      "details": "Verified idempotent on_enable prevents duplicate registrations, on_disable unregisters all hooks, and on_reload cleanly cycles state."
+    },
+    {
+      "name": "test_outgoing_message_interception",
+      "status": "pass",
+      "details": "Verified outgoing text message event is intercepted and dispatched through registered hooks before transmission."
+    }
+  ]
+}

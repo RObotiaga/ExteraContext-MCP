@@ -1,0 +1,16 @@
+{
+  "id": "outgoing-account-lifecycle",
+  "category": [
+    "implementation",
+    "multi-account",
+    "threading",
+    "lifecycle"
+  ],
+  "target": {
+    "client": "ExteraGram",
+    "platform": "Android",
+    "client_version": "12.10.1",
+    "sdk_version": "1.4.5.5"
+  },
+  "prompt": "Implement a plugin feature that intercepts an outgoing text message before send, preserves the account that triggered the callback, performs non-UI work off the UI thread, returns to the UI safely when UI work is needed, and does not leave duplicate/stale registrations after plugin disable or reload. Use the highest-level supported API available. If any part is not established for this target, state the uncertainty instead of inventing an API."
+}

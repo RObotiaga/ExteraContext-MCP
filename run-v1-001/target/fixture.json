@@ -1,0 +1,5 @@
+{
+  "fixture": "exteracontext-agent-v1-neutral-plugin",
+  "purpose": "isolated target project for end-to-end agent benchmarking",
+  "contains_api_hints": false
+}

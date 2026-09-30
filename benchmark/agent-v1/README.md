@@ -1,6 +1,6 @@
 # Agent benchmark v1
 
-This directory contains the first frozen end-to-end A/B/C benchmark for ExteraContext MCP.
+This directory defines the frozen **protocol 1.1** A/B/C benchmark for ExteraContext MCP. It is a procedure, not a claim that 60 device runs have occurred. The prior single Mode A v1-001 result is pilot-only and excluded from aggregates; no C/B comparison follows from it.
 
 ## What it compares
 
@@ -40,7 +40,7 @@ After all runs:
 python benchmark/agent-v1/aggregate.py path/to/benchmark-results
 ```
 
-The primary metric is Clean Task Success Rate. Treat missing structured output as a failed structured run rather than silently dropping it.
+The primary metric is Clean Task Success Rate. `aggregate.py` rejects stale, duplicate or inconsistent non-pilot assessments, excludes explicit pilot records and reports null (not zero) for unavailable denominators. A missing run/result must be evaluated as a failure outside the agent session before aggregation, never silently omitted. A pilot-only directory has no eligible sample and aggregation fails rather than reporting an A/B/C result.\n\nRun offline checks: `python tests/test_benchmark_protocol.py` and `python benchmark/agent-v1/validate.py`. For agent claims use `python benchmark/agent-v1/validate_result.py RUN/target/BENCHMARK_RESULT.json`; a command alone is not independent proof of a PASS.
 
 
 ## Self-contained run packets
@@ -55,4 +55,4 @@ python benchmark/agent-v1/prepare_run.py v1-001 ./run-v1-001
 
 Then open `./run-v1-001/target` in DSH and follow `BENCHMARK_MODE.md` + `BENCHMARK_TASK.md`.
 
-Mode B still requires read-only access to the separately frozen Knowledge checkout, and mode C requires the MCP connection. These are benchmark resources, not part of the target fixture.
+Before running B, use `python benchmark/agent-v1/prepare_run.py v1-002 ./fresh-b --frozen-checkout PATH_TO_LOCAL_KNOWLEDGE` (must have exact pinned HEAD). Before C, use `python benchmark/agent-v1/prepare_run.py v1-003 ./fresh-c --frozen-db PATH_TO_PINNED_SQLITE` (adjacent `.knowledge-ref` must equal the pinned commit); no download/sync is performed. The C packet includes `MCP_BENCHMARK_ENV.json` with pinned ref and per-run isolated base/mutable SQLite and orchestration root, `EXTERACONTEXT_AUTO_SYNC=0`. Without locally verified resources the packet's `RESOURCE_SETUP.md` says **NOT READY**; do not launch it. B exposes only raw checkout; C exposes only MCP; A exposes neither. Do not regenerate over nonempty directories, including the existing pilot. Device sessions remain manual and fresh.\n\nThe frozen DB stamp checks the declared ref and SQLite integrity, not the provenance of every row: the operator must independently establish the base SQLite was built from the exact frozen Knowledge commit. See `EVALUATOR.md` for per-constraint scoring, nullable correct-unknown, syntax versus target-static checks and test-evidence handling.

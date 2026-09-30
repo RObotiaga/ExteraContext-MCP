@@ -4,6 +4,12 @@ import { BridgeError, compactTarget, jsonArg, runPythonJson, targetLabel } from 
 
 const VERSION = '0.6.1';
 
+// Keep JSON carried in a single Python argv bounded well below the bridge's
+// 256 KiB total-argument ceiling. Measure bytes, not JS UTF-16 code units.
+function jsonWithinBytes(value, limit) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8') <= limit;
+}
+
 const TargetSchema = z.object({
   client: z.string().nullable().optional(),
   platform: z.string().nullable().optional(),
@@ -24,8 +30,8 @@ const EvidenceSchema = z.object({
   path: z.string().nullable().optional(),
   lines: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
-  excerpt: z.string().nullable().optional()
-}).passthrough();
+  excerpt: z.string().max(4096).nullable().optional()
+}).passthrough().refine(value => jsonWithinBytes(value, 8192), 'Evidence item exceeds 8192 UTF-8 JSON bytes');
 
 const CollectorResultSchema = z.object({
   action: z.enum(['propose', 'skip']),
@@ -167,25 +173,71 @@ function normalizeTarget(input) {
   return { target, unknown_fields: unknown };
 }
 
-function versionMatch(fact, target) {
-  const version = String(fact.version || '').toLowerCase();
-  const clientVersion = String(target.client_version || '').toLowerCase();
-  const sdkVersion = String(target.sdk_version || '').toLowerCase();
-  const requested = [clientVersion, sdkVersion].filter(Boolean);
-  if (!requested.length) return false;
-  return requested.every(v => version.includes(v));
+// Query.py returns ranked LIKE matches, not compatibility decisions. All four dimensions
+// below must be established by structured fact fields, never by ranking or claim substring.
+function exactVersionField(fact, label, requested) {
+  const version = String(fact.version || '');
+  const prefix = label === 'client' ? '(?:client|app)' : 'sdk';
+  const pattern = new RegExp(`(?:^|[;,]\\s*)${prefix}\\s+(\\d+(?:\\.\\d+)+)(?=\\s*(?:[;,]|$))`, 'ig');
+  const values = [...version.matchAll(pattern)].map(match => match[1]);
+  const mentions = [...version.matchAll(new RegExp(`\\b${prefix}\\b`, 'ig'))];
+  // A fact scoped to an SDK cannot establish support for an unknown SDK (and
+  // vice versa for a client version). Unlabelled or range bounds are not exact.
+  if (!requested) return mentions.length === 0;
+  if (!/^\d+(?:\.\d+)+$/.test(requested)) return false;
+  return mentions.length === 1 && values.length === 1 && values[0] === requested;
 }
 
-function compatibilityFromFacts(facts, target) {
-  const exact = facts.filter(f => versionMatch(f, target) && ['official', 'target-ecosystem'].includes(f.directness));
-  const negative = exact.find(f => f.topic === 'negative-evidence' || /\b(not found|unavailable|removed|does not exist|не найден|недоступ)/i.test(String(f.claim || '')));
-  if (negative) {
-    return { verdict: 'incompatible', confidence: 'evidence-supported', reason: 'Exact-target negative evidence exists.', evidence: exact.slice(0, 8) };
+function exactSymbol(api, symbol) {
+  if (!api || !symbol || !/^[\w.$]+$/.test(symbol)) return false;
+  // API lists in the immutable index are comma/semicolon separated signatures.
+  // A name mentioned only in a claim, or a prefix of another name, is insufficient.
+  return String(api).split(/[,;]/).some(entry => {
+    const name = entry.trim().match(/^([\w.$]+)(?=\s*(?:\(|$))/)?.[1];
+    return name === symbol;
+  });
+}
+
+function explicitTarget(fact, target) {
+  if (!target.client || !target.platform) return false;
+  const client = String(fact.client || '').trim();
+  const source = String(fact.source_id || '').toLowerCase();
+  // A generic 'official' label alone does not identify which client it covers.
+  const sourcedClient = source.startsWith('exteragram-') ? 'ExteraGram' : '';
+  if ((client || sourcedClient).toLowerCase() !== target.client.toLowerCase()) return false;
+  return String(fact.platform || '').trim().toLowerCase() === target.platform.toLowerCase();
+}
+
+function assertionPolarity(fact, symbol) {
+  if (!['code', 'docs', 'runtime-verified'].includes(fact.status)) return null;
+  if (fact.knowledge_state && fact.knowledge_state !== 'verified') return null;
+  if (fact.review_status && ['conflicting', 'rejected', 'candidate'].includes(fact.review_status)) return null;
+  const claim = String(fact.claim || '').trim();
+  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`(^|[^\\w.$])${escaped}(?![\\w.$])`, 'i').test(claim)) return null;
+  // Absence of search results (or a negative-evidence topic) is NOT incompatibility.
+  const negative = /\b(?:not supported|unsupported|unavailable|removed|does not exist|incompatible)\b|\b(?:не поддерживается|недоступен|недоступна|удалён|удален|несовместим)\b/i.test(claim);
+  const positive = /\b(?:supported|supports|available|implemented|compatible|works)\b|\b(?:поддерживается|доступен|доступна|реализован|совместим)\b/i.test(
+    claim.replace(/\b(?:not supported|unsupported|unavailable|removed|does not exist|incompatible)\b|\b(?:не поддерживается|недоступен|недоступна|удалён|удален|несовместим)\b/ig, '')
+  );
+  return negative === positive ? null : negative ? 'incompatible' : 'compatible';
+}
+
+export function compatibilityFromFacts(facts, target, symbol) {
+  const relevant = facts.filter(f =>
+    ['official', 'target-ecosystem'].includes(f.directness) &&
+    explicitTarget(f, target) && exactSymbol(f.api, symbol) &&
+    (target.client_version || target.sdk_version) &&
+    exactVersionField(f, 'client', target.client_version) &&
+    exactVersionField(f, 'sdk', target.sdk_version)
+  );
+  const assertions = relevant.map(f => ({ fact: f, verdict: assertionPolarity(f, symbol) })).filter(x => x.verdict);
+  const verdicts = new Set(assertions.map(x => x.verdict));
+  if (verdicts.size === 1) {
+    const verdict = assertions[0].verdict;
+    return { verdict, confidence: 'evidence-supported', reason: 'Explicit API assertion for exact target, platform and requested version dimensions.', evidence: assertions.map(x => x.fact).slice(0, 8) };
   }
-  if (exact.length) {
-    return { verdict: 'compatible', confidence: 'evidence-supported', reason: 'Exact requested version appears in direct target/official evidence.', evidence: exact.slice(0, 8) };
-  }
-  return { verdict: 'unknown', confidence: 'conservative', reason: 'No exact-version direct evidence establishes compatibility or incompatibility.', evidence: facts.slice(0, 8) };
+  return { verdict: 'unknown', confidence: 'conservative', reason: verdicts.size > 1 ? 'Conflicting exact-target API assertions.' : 'No explicit exact-target API assertion establishes compatibility or incompatibility.', evidence: facts.slice(0, 8) };
 }
 
 async function query(command, value, options = {}) {
@@ -199,8 +251,8 @@ async function query(command, value, options = {}) {
   return runPythonJson(args.shift(), args);
 }
 
-async function orchestrate(command, args) {
-  return runPythonJson('scripts/orchestrate.py', [command, ...args]);
+async function orchestrate(command, args, options = {}) {
+  return runPythonJson('scripts/orchestrate.py', [command, ...args], options);
 }
 
 async function knowledge(command, args) {
@@ -309,7 +361,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
   }, async input => guarded('check_compatibility', async () => {
     const facts = await query('api', input.symbol, { limit: input.limit });
     const list = Array.isArray(facts) ? facts : [];
-    const result = compatibilityFromFacts(list, compactTarget(input.target));
+    const result = compatibilityFromFacts(list, compactTarget(input.target), input.symbol);
     const warnings = result.verdict === 'unknown' ? ['Unknown means evidence is insufficient; it is not a compatibility failure.'] : [];
     return toolResponse('check_compatibility', { symbol: input.symbol, target: compactTarget(input.target), ...result }, warnings, protocolMeta);
   }));
@@ -318,11 +370,11 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     title: 'Start Knowledge Capture',
     description: 'Start the two-subagent write-back protocol from original evidence and produce a collector prompt/schema. This only creates a candidate workflow; it does not trust new knowledge.',
     inputSchema: z.object({
-      task: z.string().min(1),
-      task_id: z.string().optional(),
-      discovery: z.string().optional(),
+      task: z.string().min(1).max(4096),
+      task_id: z.string().max(256).optional(),
+      discovery: z.string().max(8192).optional(),
       target: TargetSchema.optional(),
-      evidence: z.array(EvidenceSchema).min(1)
+      evidence: z.array(EvidenceSchema).min(1).max(16).refine(value => jsonWithinBytes(value, 131072), 'Evidence exceeds 131072 UTF-8 JSON bytes')
     }),
     outputSchema: EnvelopeSchema,
     annotations: APPEND_ANNOTATIONS
@@ -347,10 +399,10 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: APPEND_ANNOTATIONS
   }, async input => guarded('submit_collector_result', async () => {
-    const args = ['--id', input.orchestration_id, '--actor-token', input.actor_token, '--result', jsonArg(input.result)];
+    const args = ['--id', input.orchestration_id, '--actor-token-stdin', '--result', jsonArg(input.result)];
     if (input.model) args.push('--model', input.model);
     if (input.runtime_actor) args.push('--runtime-actor', jsonArg(input.runtime_actor));
-    return toolResponse('submit_collector_result', await orchestrate('collector-result', args), [], protocolMeta);
+    return toolResponse('submit_collector_result', await orchestrate('collector-result', args, { stdin: input.actor_token }), [], protocolMeta);
   }));
 
   server.registerTool('submit_verifier_phase_a', {
@@ -366,10 +418,10 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: APPEND_ANNOTATIONS
   }, async input => guarded('submit_verifier_phase_a', async () => {
-    const args = ['--id', input.orchestration_id, '--actor-token', input.actor_token, '--result', jsonArg(input.result)];
+    const args = ['--id', input.orchestration_id, '--actor-token-stdin', '--result', jsonArg(input.result)];
     if (input.model) args.push('--model', input.model);
     if (input.runtime_actor) args.push('--runtime-actor', jsonArg(input.runtime_actor));
-    return toolResponse('submit_verifier_phase_a', await orchestrate('phase-a-result', args), [], protocolMeta);
+    return toolResponse('submit_verifier_phase_a', await orchestrate('phase-a-result', args, { stdin: input.actor_token }), [], protocolMeta);
   }));
 
   server.registerTool('submit_verifier_phase_b', {
@@ -384,9 +436,9 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: APPEND_ANNOTATIONS
   }, async input => guarded('submit_verifier_phase_b', async () => {
-    const args = ['--id', input.orchestration_id, '--actor-token', input.actor_token, '--result', jsonArg(input.result)];
+    const args = ['--id', input.orchestration_id, '--actor-token-stdin', '--result', jsonArg(input.result)];
     if (input.runtime_actor) args.push('--runtime-actor', jsonArg(input.runtime_actor));
-    return toolResponse('submit_verifier_phase_b', await orchestrate('phase-b-result', args), [], protocolMeta);
+    return toolResponse('submit_verifier_phase_b', await orchestrate('phase-b-result', args, { stdin: input.actor_token }), [], protocolMeta);
   }));
 
   server.registerTool('get_capture_status', {
@@ -399,7 +451,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
 
   server.registerTool('record_runtime_result', {
     title: 'Record Runtime Verification',
-    description: 'Append a machine/runtime PASS or FAIL to an existing trusted claim or legacy fact. It cannot promote an unverified candidate by itself.',
+    description: 'Disabled until trusted runtime attestation is integrated. Caller-provided PASS or FAIL cannot establish runtime verification.',
     inputSchema: z.object({
       subject_type: z.enum(['claim', 'legacy_fact']),
       subject_id: z.string().min(1),
@@ -409,28 +461,15 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
       model: z.string().default('runtime-harness'),
       session_id: z.string().optional(),
       target: TargetSchema.optional(),
-      log_excerpt: z.string().optional(),
-      metadata: z.record(z.string(), z.unknown()).optional()
+      log_excerpt: z.string().max(4096).optional(),
+      metadata: z.record(z.string(), z.unknown()).refine(value => jsonWithinBytes(value, 8192), 'Metadata exceeds 8192 UTF-8 JSON bytes').optional()
     }),
     outputSchema: EnvelopeSchema,
     annotations: APPEND_ANNOTATIONS
-  }, async input => guarded('record_runtime_result', async () => {
-    const createArgs = ['--role', 'runtime', '--model', input.model];
-    if (input.session_id) createArgs.push('--session-id', input.session_id);
-    if (input.metadata) createArgs.push('--metadata', jsonArg(input.metadata));
-    const run = await knowledge('run-create', createArgs);
-    const runId = run?.run_id;
-    if (!runId) throw new Error('Runtime provenance run was not created.');
-    const args = ['--run-id', runId, '--subject-type', input.subject_type, '--subject-id', input.subject_id, '--result', input.result, '--test-id', input.test_id, '--runs', String(input.runs)];
-    const target = compactTarget(input.target || {});
-    if (target.client) args.push('--client', target.client);
-    if (target.platform) args.push('--platform', target.platform);
-    if (target.client_version) args.push('--client-version', target.client_version);
-    if (target.sdk_version) args.push('--sdk-version', target.sdk_version);
-    if (input.log_excerpt) args.push('--log-excerpt', input.log_excerpt);
-    if (input.metadata) args.push('--metadata', jsonArg(input.metadata));
-    const recorded = await knowledge('record-runtime', args);
-    return toolResponse('record_runtime_result', { run, recorded }, [], protocolMeta);
+  }, async () => guarded('record_runtime_result', async () => {
+    // A caller-controlled result, model, log or metadata is not a runtime attestation.
+    // Reject both PASS and FAIL before creating a run or mutating the knowledge store.
+    throw new Error('Runtime result recording is disabled: trusted runtime attestation is not integrated; caller-provided PASS/FAIL is not accepted.');
   }));
 
   server.registerTool('doctor', {

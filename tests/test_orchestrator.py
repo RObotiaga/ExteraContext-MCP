@@ -8,15 +8,15 @@ ORCH=ROOT/'scripts'/'orchestrate.py'
 PYTHON=sys.executable
 
 
-def run(args, env):
-    cp=subprocess.run([PYTHON,str(ORCH),*args],cwd=ROOT,env=env,text=True,encoding='utf-8',capture_output=True)
+def run(args, env, stdin=None):
+    cp=subprocess.run([PYTHON,str(ORCH),*args],cwd=ROOT,env=env,text=True,encoding='utf-8',capture_output=True,input=stdin)
     if cp.returncode != 0:
         raise AssertionError(f"command failed: {args}\nstdout={cp.stdout}\nstderr={cp.stderr}")
     return json.loads(cp.stdout)
 
 
-def run_fail(args, env, contains=None):
-    cp=subprocess.run([PYTHON,str(ORCH),*args],cwd=ROOT,env=env,text=True,encoding='utf-8',capture_output=True)
+def run_fail(args, env, contains=None, stdin=None):
+    cp=subprocess.run([PYTHON,str(ORCH),*args],cwd=ROOT,env=env,text=True,encoding='utf-8',capture_output=True,input=stdin)
     assert cp.returncode != 0, (args,cp.stdout,cp.stderr)
     if contains:
         assert contains.lower() in (cp.stderr+cp.stdout).lower(), (contains, cp.stdout, cp.stderr)
@@ -35,6 +35,7 @@ def main():
         evidence=[{
           "evidence_type":"source","evidence_status":"code","source_type":"target-code",
           "repository":"owner/repo","commit":"abc123","path":"plugin.py","lines":"10-20",
+          "client":"ExteraGram","platform":"Android","client_version":"12.10.1","sdk_version":"1.4.5.5",
           "excerpt":"Проверка → def on_send_message_hook(account, params): ... ✓"
         }]
         target={"client":"ExteraGram","platform":"Android","client_version":"12.10.1","sdk_version":"1.4.5.5"}
@@ -123,7 +124,7 @@ def main():
         qcol=dict(col); qcol['claim']='EXTERACONTEXT_WRITEBACK_SENTINEL has the value 7319 in this acceptance-test project.'; qcol['api_symbol']=None; qcol['kind']='other'; qcol['scope']='project'; qcol['evidence_status']='docs'
         qcp=write_json(td/'qcol.json',qcol)
         qc=run(['--run-root',str(rr),'collector-result','--id',q['orchestration_id'],'--actor-token',q['collector_token'],'--result',qcp],env)
-        qpa=dict(pa); qpa['statement']='The supplied project fixture states that EXTERACONTEXT_WRITEBACK_SENTINEL has the value 7319.'; qpa['evidence_status']='docs'
+        qpa=dict(pa); qpa['statement']='The supplied project fixture states that EXTERACONTEXT_WRITEBACK_SENTINEL has the value 7319.'; qpa['scope']={'scope':'project'}; qpa['evidence_status']='docs'
         qpap=write_json(td/'qpa.json',qpa)
         run(['--run-root',str(rr),'phase-a-result','--id',q['orchestration_id'],'--actor-token',qc['verifier_token'],'--result',qpap],env)
         qz=run(['--run-root',str(rr),'phase-b-result','--id',q['orchestration_id'],'--actor-token',qc['verifier_token'],'--result',pbp],env)
@@ -133,6 +134,19 @@ def main():
         assert qr.returncode == 0, qr.stderr
         qdata=json.loads(qr.stdout)
         assert any('7319' in str(item.get('claim','')) for item in qdata), qdata
+
+        # Test stdin token passing across collector-result, phase-a-result, phase-b-result
+        s_orch = run(['--run-root',str(rr),'reflect','--task','Stdin orchestration','--target',tp,'--evidence',qev],env)
+        s_oid = s_orch['orchestration_id']
+        s_col_token = s_orch['collector_token']
+        # 1. collector-result with --actor-token-stdin
+        s_c = run(['--run-root',str(rr),'collector-result','--id',s_oid,'--actor-token-stdin','--result',qcp],env,stdin=s_col_token)
+        s_ver_token = s_c['verifier_token']
+        # 2. phase-a-result with --actor-token -
+        run(['--run-root',str(rr),'phase-a-result','--id',s_oid,'--actor-token','-','--result',qpap],env,stdin=s_ver_token)
+        # 3. phase-b-result with omitted --actor-token
+        s_z = run(['--run-root',str(rr),'phase-b-result','--id',s_oid,'--result',pbp],env,stdin=s_ver_token)
+        assert s_z['result']['state']=='verified'
 
         print('orchestrator: ok')
 

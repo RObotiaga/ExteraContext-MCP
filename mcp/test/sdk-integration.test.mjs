@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { createServer as createNetServer } from 'node:net';
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,7 @@ test('strict stdio negotiates MCP 2026-07-28 and exposes structured tools', { ti
     command: process.execPath,
     args: [resolve(root, 'mcp/src/index.mjs'), '--transport', 'stdio', '--modern-only'],
     cwd: root,
+    env: { ...process.env }, // SDK default environment omits EXTERACONTEXT_DB and EXTERACONTEXT_PYTHON.
     stderr: 'pipe'
   });
 
@@ -106,38 +108,70 @@ function waitForListening(child, timeoutMs = 15_000) {
   });
 }
 
-test('strict Streamable HTTP negotiates MCP 2026-07-28', { timeout: 90_000 }, async t => {
-  const sdk = await loadSdk(t);
-  if (!sdk) return;
-  const { Client, StreamableHTTPClientTransport } = sdk;
+test('HTTP bearer boundary rejects unauthenticated requests and accepts test token', { timeout: 90_000 }, async t => {
+  try {
+    await Promise.all([
+      import('@modelcontextprotocol/server'),
+      import('@modelcontextprotocol/node'),
+      import('zod/v4')
+    ]);
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND' || /Cannot find package|Cannot find module/.test(String(error?.message))) {
+      t.skip(`MCP server dependencies are missing or incomplete locally (${error.message}); no dependency installation performed.`);
+      return;
+    }
+    throw error;
+  }
+
+  const token = randomBytes(32).toString('hex');
   const port = await freePort();
   const child = spawn(process.execPath, [resolve(root, 'mcp/src/index.mjs'), '--transport', 'http', '--host', '127.0.0.1', '--port', String(port), '--modern-only', '--response-mode', 'json'], {
     cwd: root,
+    env: { ...process.env, EXTERACONTEXT_MCP_HTTP_TOKEN: token },
     stdio: ['ignore', 'ignore', 'pipe']
   });
 
   try {
     await waitForListening(child);
-    const client = new Client(
-      { name: 'exteracontext-http-integration-test', version: '1.0.0' },
-      { versionNegotiation: { mode: { pin: '2026-07-28' } } }
-    );
-    try {
-      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
-      assert.equal(client.getProtocolEra(), 'modern');
-      assert.equal(client.getNegotiatedProtocolVersion(), '2026-07-28');
-      const result = await client.callTool({ name: 'doctor', arguments: {} });
-      assert.equal(result.structuredContent?.ok, true);
-      assert.equal(result.structuredContent?.meta?.protocol_era, 'modern');
-    } finally {
-      await client.close().catch(() => {});
-    }
+    const url = `http://127.0.0.1:${port}/mcp`;
+    const request = { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) };
+    const denied = await fetch(url, request);
+    assert.equal(denied.status, 401, 'requests without Authorization must be rejected');
+    assert.equal(denied.headers.get('www-authenticate'), 'Bearer');
+    const authorized = await fetch(url, { ...request, headers: { ...request.headers, Authorization: `Bearer ${token}` } });
+    assert.notEqual(authorized.status, 401, 'the test-only bearer must be accepted');
+    assert.ok(authorized.status < 500, `authorized MCP request failed with HTTP ${authorized.status}: ${await authorized.text()}`);
+
+    await t.test('authenticated Streamable HTTP client negotiates MCP 2026-07-28', async clientTest => {
+      const sdk = await loadSdk(clientTest);
+      if (!sdk) return;
+      const client = new sdk.Client(
+        { name: 'exteracontext-http-integration-test', version: '1.0.0' },
+        { versionNegotiation: { mode: { pin: '2026-07-28' } } }
+      );
+      try {
+        // @modelcontextprotocol/client 2.1.0 dist/index.d.mts documents authProvider.token()
+        // as a bearer token source for every StreamableHTTPClientTransport request.
+        const transport = new sdk.StreamableHTTPClientTransport(new URL(url), {
+          authProvider: { token: async () => token }
+        });
+        await client.connect(transport);
+        assert.equal(client.getProtocolEra(), 'modern');
+        assert.equal(client.getNegotiatedProtocolVersion(), '2026-07-28');
+        const result = await client.callTool({ name: 'doctor', arguments: {} });
+        assert.equal(result.structuredContent?.ok, true);
+        assert.equal(result.structuredContent?.meta?.protocol_era, 'modern');
+      } finally {
+        await client.close().catch(() => {});
+      }
+    });
   } finally {
-    child.kill('SIGTERM');
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
     await new Promise(resolvePromise => {
-      if (child.exitCode !== null) return resolvePromise();
-      child.once('exit', resolvePromise);
-      setTimeout(() => { child.kill('SIGKILL'); resolvePromise(); }, 5000).unref();
+      if (child.exitCode !== null || child.signalCode !== null) return resolvePromise();
+      const timer = setTimeout(() => { child.kill('SIGKILL'); resolvePromise(); }, 5000);
+      timer.unref();
+      child.once('exit', () => { clearTimeout(timer); resolvePromise(); });
     });
   }
 });

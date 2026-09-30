@@ -1,6 +1,6 @@
 # ExteraContext Knowledge Store
 
-`data/knowledge.sqlite` is the mutable, append-oriented engineering memory. It is intentionally separate from `data/exteracontext.sqlite`, which is a generated read-only index of the bundled wiki.
+`data/knowledge.sqlite` is the mutable, append-oriented engineering memory (the **overlay**). It is intentionally separate from `data/exteracontext.sqlite`, the deployed **immutable base** corpus index. Retrieval merges the two; read-only queries must neither create/migrate the overlay nor modify the base. Initialize or restore the overlay explicitly for writes; keep separate backups and access controls for both. The base is not built, downloaded, or refreshed by ordinary offline deployment. See [production readiness](docs/PRODUCTION_READINESS.md) for offline bootstrap and release controls.
 
 ## Trust boundary
 
@@ -14,7 +14,7 @@ All new claims start as `candidate`. SQLite triggers block direct promotion to t
 
 ## Legacy wiki provenance
 
-The bundled read-only wiki predates the executable write-back protocol. `data/legacy-source-runs.json` records the original collector/reviewer runs reconstructed from the supplied prompt archive. `scripts/build_index.py` imports this into `source_runs` and `source_provenance`.
+The legacy read-only wiki predates the executable write-back protocol. Where the approved source corpus is present, `data/legacy-source-runs.json` records collector/reviewer runs reconstructed from the supplied prompt archive; `scripts/build_index.py` can import this into `source_runs` and `source_provenance` during a separately authorized build. Ordinary offline deployment instead copies an **existing** SQLite base via `scripts/sync_knowledge.py`; it does not rebuild the wiki or independently establish signed corpus provenance.
 
 Legacy review is classified as `independent-source-reread-nonblind`: reviewers were separate runs with their own call IDs and re-read the primary snapshots, but they could inspect and edit collector outputs. Therefore:
 
@@ -126,6 +126,7 @@ The MCP orchestration layer cannot assume that a host such as DeepSeek Harness e
 - collector submission consumes that token and creates a different verifier capability actor/token;
 - verifier Phase A and Phase B require the same verifier token;
 - orchestration state stores SHA-256 token hashes only;
+- to prevent token leakage in OS process argument listings (`process.argv` inspection), MCP orchestration child process calls pass capability tokens over standard input `stdin` (`--actor-token-stdin`);
 - wrong-role, wrong-orchestration, replay, or wrong-stage token use fails closed;
 - the database still records distinct collector and verifier `knowledge_runs`, so SQLite independence guards remain effective.
 
@@ -135,17 +136,11 @@ Capability continuity does not prove that two physical LLM processes were isolat
 
 ## Runtime evidence
 
-Runtime evidence is machine evidence, not an agent opinion. Create a dedicated runtime run:
+Runtime evidence is machine evidence, not an agent opinion. A dedicated runtime run is required.
 
-```bash
-python scripts/knowledge.py run-create --role runtime --model device-harness --task-id <id>
-python scripts/knowledge.py record-runtime \
-  --run-id <runtime-run> --subject-type claim --subject-id <claim> \
-  --result pass --test-id outgoing-hook-basic --runs 3 \
-  --client ExteraGram --client-version 12.10.1 --sdk-version 1.4.5.5
-```
+The MCP `record_runtime_result` tool currently **rejects all calls** until a trusted machine attestation is integrated. The low-level CLI path is reserved for a controlled, machine-only harness: it requires configured `EXTERACONTEXT_RUNTIME_SOURCE` and `EXTERACONTEXT_RUNTIME_TOKEN` (implementation checks at least 32 characters; release policy requires at least 32 random bytes of entropy and a secret manager), plus matching `--runtime-source` and `--attestation-token` (or stdin token passing) on both `run-create --role runtime` and `record-runtime`. It rejects `legacy_fact`, non-trusted claims, and mismatched target fields; `--client`, `--platform`, `--client-version`, and `--sdk-version` must match the existing claim. Do **not** hand those flags or the secret to an untrusted caller. To eliminate secret exposure in process argument listings (OS `process.argv` inspection), attestation CLI commands support secure token input via `stdin` (`--attestation-token-stdin` or `--attestation-token -`); do not deploy or pass credentials via raw argv on shared hosts. This mechanism attests the *caller*, not proof of a device test: retain machine-generated logs, test identity, named build/device and target binding separately.
 
-Only `runtime` runs may use this direct path. A runtime pass can strengthen a verified claim to `runtime-verified`; it never directly promotes an unreviewed candidate.
+Only an attested `runtime` run may use this direct path. A runtime pass can strengthen an already verified claim to `runtime-verified`; it never directly promotes an unreviewed candidate. Source inspection, ordinary model metadata, a claimed runtime role, or a successful build cannot substitute for machine evidence. No device-runtime success is asserted by this documentation.
 
 ## Retrieval
 
