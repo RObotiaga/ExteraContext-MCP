@@ -7,6 +7,7 @@ from collections import Counter
 from pathlib import Path
 import subprocess
 import sys
+from scoring import GROUND, RUNS, UNKNOWN_TASKS, PROTOCOL, SCHEMA_VERSION
 
 ROOT = Path(__file__).resolve().parent
 tasks_doc = json.loads((ROOT / "tasks.json").read_text("utf-8"))
@@ -20,7 +21,15 @@ ids = [t["id"] for t in tasks]
 assert len(tasks) == 10, len(tasks)
 assert len(set(ids)) == 10
 assert len(runs) == 60, len(runs)
-assert set(ground["tasks"]) == set(ids)
+assert set(ground["tasks"]) == set(ids) == set(GROUND)
+assert ground["frozen_knowledge_commit"] == "70f6f614227c8b02d241e7b1e72a0b6691442fd1"
+assert UNKNOWN_TASKS <= set(ids)
+assert len(RUNS) == len(runs)
+assessment_schema = json.loads((ROOT / "assessment.schema.json").read_text("utf-8"))
+assert assessment_schema["properties"]["protocol_version"]["const"] == PROTOCOL
+assert assessment_schema["properties"]["assessment_schema_version"]["const"] == SCHEMA_VERSION
+result_schema = json.loads((ROOT / "result.schema.json").read_text("utf-8"))
+assert "allOf" in result_schema["properties"]["tests"]["items"]
 
 fixture = ROOT / "fixture-template"
 assert (fixture / "README.md").exists()

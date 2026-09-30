@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createServer as createHttpServer } from 'node:http';
 import process from 'node:process';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
@@ -23,7 +24,7 @@ function parseArgs(argv) {
   if (!['stdio', 'http'].includes(out.transport)) throw new Error('--transport must be stdio or http');
   if (!Number.isInteger(out.port) || out.port < 1 || out.port > 65535) throw new Error('--port must be 1..65535');
   if (!['auto', 'json', 'sse'].includes(out.responseMode)) throw new Error('--response-mode must be auto|json|sse');
-  if (!out.path.startsWith('/')) throw new Error('--path must begin with /');
+  if (!/^\/(?!\/)[A-Za-z0-9/_-]*$/.test(out.path)) throw new Error('--path must be a plain absolute URL path');
   return out;
 }
 
@@ -62,6 +63,19 @@ async function main() {
     throw new Error('HTTP transport is loopback-only in v0.6.1. Put a trusted reverse proxy/auth layer in front instead of binding ExteraContext directly to a public interface.');
   }
 
+  // Explicit secret is mandatory for HTTP; stdio has no bearer requirement.
+  const token = process.env.EXTERACONTEXT_MCP_HTTP_TOKEN;
+  if (!token || Buffer.byteLength(token) < 32) {
+    throw new Error('HTTP transport requires EXTERACONTEXT_MCP_HTTP_TOKEN (at least 32 bytes)');
+  }
+  const expectedTokenHash = createHash('sha256').update(token).digest();
+  const authenticated = req => {
+    const auth = req.headers.authorization;
+    if (typeof auth !== 'string' || !/^Bearer [^\s]+$/.test(auth)) return false;
+    const suppliedHash = createHash('sha256').update(auth.slice(7)).digest();
+    return timingSafeEqual(expectedTokenHash, suppliedHash);
+  };
+
   const handler = createMcpHandler(({ era }) => buildServer({ era, legacyAllowed: !args.modernOnly }), {
     legacy: args.modernOnly ? 'reject' : 'stateless',
     responseMode: args.responseMode,
@@ -72,21 +86,63 @@ async function main() {
   const validateOrigin = localhostOriginValidation();
 
   const http = createHttpServer((req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    // Check the raw authority and origin before any preflight response or CORS headers.
+    const host = req.headers.host;
+    const hostMatch = typeof host === 'string' && /^(localhost|127\.0\.0\.1|\[::1\])(?::([1-9][0-9]{0,4}))?$/i.exec(host);
+    const countHeader = name => req.rawHeaders.filter((_, i) => i % 2 === 0 && req.rawHeaders[i].toLowerCase() === name).length;
+    if (!hostMatch || countHeader('host') !== 1 || Number(hostMatch[2] || 80) !== args.port) {
+      res.writeHead(400).end('Invalid Host');
+      return;
+    }
+    // The SDK localhost guard allows any loopback hostname/port and accepts some
+    // non-origin URLs. A browser Origin must instead match this request authority.
+    const origin = req.headers.origin;
+    if (countHeader('origin') > 1 || (origin !== undefined && (() => {
+      try {
+        const parsed = new URL(origin);
+        return parsed.protocol !== 'http:' || parsed.username !== '' || parsed.password !== '' ||
+          parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '' ||
+          parsed.hostname.toLowerCase() !== hostMatch[1].toLowerCase() ||
+          Number(parsed.port || 80) !== args.port;
+      } catch { return true; }
+    })())) {
+      res.writeHead(403).end('Invalid Origin');
+      return;
+    }
+    try {
+      if (!validateHost(req, res) || !validateOrigin(req, res)) return;
+    } catch {
+      if (!res.headersSent) res.writeHead(400).end('Invalid Host or Origin');
+      else res.end();
+      return;
+    }
+    const raw = req.url;
+    if (typeof raw !== 'string' || !/^\/(?!\/)/.test(raw) || /[\\#\x00-\x20\x7f]/.test(raw)) {
+      res.writeHead(400).end('Malformed URL');
+      return;
+    }
+    let url;
+    try { url = new URL(raw, 'http://localhost'); }
+    catch { res.writeHead(400).end('Malformed URL'); return; }
     if (url.pathname !== args.path) {
-      res.statusCode = 404;
-      res.end('Not found');
+      res.writeHead(404).end('Not found');
       return;
     }
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST,GET,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+    if (typeof origin === 'string') {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'POST,GET,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Session-Id, MCP-Protocol-Version, Mcp-Method, Mcp-Name');
+    }
     if (req.method === 'OPTIONS') {
-      res.statusCode = 204;
-      res.end();
+      res.writeHead(204).end();
       return;
     }
-    if (!validateHost(req, res) || !validateOrigin(req, res)) return;
+    if (!authenticated(req)) {
+      res.setHeader('WWW-Authenticate', 'Bearer');
+      res.writeHead(401).end('Unauthorized');
+      return;
+    }
     void nodeHandler(req, res);
   });
 

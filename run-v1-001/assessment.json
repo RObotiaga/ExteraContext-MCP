@@ -1,0 +1,29 @@
+{
+  "protocol_version": "1.0-pilot",
+  "pilot": true,
+  "exclude_from_aggregate": true,
+  "run_id": "v1-001",
+  "task_id": "outgoing-account-lifecycle",
+  "mode": "A",
+  "repeat": 1,
+  "materially_completed": false,
+  "invented_api": false,
+  "donor_contamination": false,
+  "version_mismatch": false,
+  "constraints": [
+    {"constraint": "triggering account", "passed": true, "evidence": "Pilot inspection: callback account propagated."},
+    {"constraint": "background/non-UI work", "passed": true, "evidence": "Pilot inspection: worker dispatch used."},
+    {"constraint": "UI-thread return", "passed": false, "evidence": "Independent pilot exercise: callback ran on PluginWorker_0, not UI thread."},
+    {"constraint": "cleanup/reload", "passed": true, "evidence": "Pilot inspection: lifecycle cleanup checked locally."}
+  ],
+  "constraints_handled": false,
+  "correct_unknown": null,
+  "unnecessary_low_level_fallback": false,
+  "python_compile_success": true,
+  "target_static_success": false,
+  "load_success": null,
+  "runtime_success": null,
+  "evidence_boundary_correct": true,
+  "clean_success": false,
+  "notes": "PILOT ONLY: old protocol, not an A/B/C statistic. Local Python compilation succeeded, target host integration and UI thread did not. Self-reported test PASS claims had no preserved reproducible test artifacts; do not treat as verified. Rerun v1-001 under protocol 1.1 before comparison."
+}

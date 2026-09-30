@@ -36,25 +36,32 @@ def dump(v: Any) -> None:
     print(json.dumps(v, ensure_ascii=False, indent=2))
 
 
-def load_json_arg(value: str | None, default: Any = None) -> Any:
+def load_json_arg(value: str | None, default: Any = None, *, literal: bool = False) -> Any:
     if value is None:
         return default
-    if value.startswith("@"):
+    if not literal and value.startswith("@"):
         return json.loads(Path(value[1:]).read_text(encoding="utf-8"))
     return json.loads(value)
 
 
-def load_text_arg(value: str | None, default: str = "") -> str:
+def load_text_arg(value: str | None, default: str = "", *, literal: bool = False) -> str:
     if value is None:
         return default
-    if value.startswith("@"):
+    if not literal and value.startswith("@"):
         return Path(value[1:]).read_text(encoding="utf-8")
     return value
 
 
+def literal_inputs(args: argparse.Namespace) -> bool:
+    # MCP must pass --literal-inputs. Trusted interactive CLI callers retain @file support.
+    return args.literal_inputs or os.environ.get("EXTERACONTEXT_LITERAL_INPUTS") == "1"
+
+
 def safe_id(value: str) -> str:
     s = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-")
-    return s[:60] or "task"
+    while ".." in s:
+        s = s.replace("..", ".")
+    return s[:60].strip("-.") or "task"
 
 
 def _token_digest(token: str) -> str:
@@ -82,8 +89,14 @@ def require_actor_token(state: dict[str, Any], role: str, token: str, *, allow_c
         raise ValueError(f"{role} actor token has already been consumed")
 
 
-def parse_runtime_actor(value: str | None) -> dict[str, Any]:
-    actor = load_json_arg(value, {}) if value else {}
+def resolve_actor_token(args: argparse.Namespace) -> str:
+    if getattr(args, "actor_token_stdin", False) or not getattr(args, "actor_token", None) or args.actor_token == "-":
+        return sys.stdin.readline().strip()
+    return args.actor_token
+
+
+def parse_runtime_actor(value: str | None, *, literal: bool = False) -> dict[str, Any]:
+    actor = load_json_arg(value, {}, literal=literal) if value else {}
     if actor is None:
         return {}
     if not isinstance(actor, dict):
@@ -117,9 +130,16 @@ def require_runtime_actor_continuity(previous: dict[str, Any] | None, current: d
 
 
 def run_dir(run_root: Path, orch_id: str) -> Path:
-    p = run_root / orch_id
-    if not p.exists():
-        raise ValueError(f"unknown orchestration: {orch_id}")
+    # IDs are generated as <safe seed>-<8 hex>. Never interpret an ID as a path.
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,60}-[0-9a-f]{8}", orch_id) or ".." in orch_id:
+        raise ValueError("invalid orchestration id")
+    root = run_root.resolve()
+    p = (root / orch_id).resolve()
+    if p.parent != root or not p.is_dir():
+        raise ValueError("unknown orchestration")
+    state_path = (p / "state.json").resolve()
+    if state_path.parent != p or not state_path.is_file():
+        raise ValueError("unknown orchestration")
     return p
 
 
@@ -146,12 +166,14 @@ def validate_shape(kind: str, obj: Any) -> None:
         if obj["kind"] not in ks.CLAIM_KINDS: raise ValueError("invalid collector kind")
         if obj["scope"] not in ks.SCOPES: raise ValueError("invalid collector scope")
         if obj["evidence_status"] not in ks.EVIDENCE_STATUSES: raise ValueError("invalid collector evidence_status")
+        if obj["evidence_status"] == "runtime-verified": raise ValueError("runtime-verified requires an attested machine runtime result")
         if not isinstance(obj["target"], dict) or not isinstance(obj["evidence_refs"], list): raise ValueError("invalid collector target/evidence_refs")
     elif kind == "phase_a":
         req = {"statement","scope","evidence_status","uncertainty"}
         if missing := req - obj.keys(): raise ValueError(f"phase A missing fields: {sorted(missing)}")
         if not str(obj["statement"]).strip(): raise ValueError("phase A statement cannot be empty")
         if obj["evidence_status"] not in ks.EVIDENCE_STATUSES: raise ValueError("invalid phase A evidence_status")
+        if obj["evidence_status"] == "runtime-verified": raise ValueError("runtime-verified requires an attested machine runtime result")
     elif kind == "phase_b":
         req = {"verdict","final_statement","existing_subject_type","existing_subject_id","notes"}
         if missing := req - obj.keys(): raise ValueError(f"phase B missing fields: {sorted(missing)}")
@@ -179,6 +201,8 @@ def normalize_evidence(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             item = {"evidence_type": "note", "excerpt": str(item)}
         ev = dict(item)
+        if ev.get("evidence_status") == "runtime-verified":
+            raise ValueError("runtime-verified evidence requires an attested machine runtime result")
         ev.setdefault("evidence_id", f"source-{i:03d}")
         ev.setdefault("evidence_type", "source")
         out.append(ev)
@@ -192,6 +216,10 @@ def selected_original_evidence(state: dict[str, Any], refs: list[str]) -> list[d
     unknown = [r for r in refs if r not in by_id]
     if unknown:
         raise ValueError(f"collector referenced unknown original evidence: {unknown}")
+    # Recheck persisted state: older or externally edited orchestrations must not
+    # launder a runtime-verified label through the collector protocol.
+    if any(by_id[r].get("evidence_status") == "runtime-verified" for r in refs):
+        raise ValueError("runtime-verified evidence requires an attested machine runtime result")
     # Remove orchestration-only id before persistence.
     return [{k:v for k,v in by_id[r].items() if k != "evidence_id"} for r in refs]
 
@@ -273,9 +301,9 @@ EXISTING TRUSTED MATCHES:
 def cmd_reflect(args: argparse.Namespace) -> None:
     root = Path(args.run_root)
     root.mkdir(parents=True, exist_ok=True)
-    task = load_text_arg(args.task)
-    evidence = normalize_evidence(load_json_arg(args.evidence, []))
-    target = load_json_arg(args.target, {})
+    task = load_text_arg(args.task, literal=literal_inputs(args))
+    evidence = normalize_evidence(load_json_arg(args.evidence, [], literal=literal_inputs(args)))
+    target = load_json_arg(args.target, {}, literal=literal_inputs(args))
     seed = safe_id(args.task_id or task[:32])
     oid = f"{seed}-{uuid.uuid4().hex[:8]}"
     p = root / oid
@@ -303,14 +331,15 @@ def cmd_reflect(args: argparse.Namespace) -> None:
 
 
 def cmd_collector(args: argparse.Namespace) -> None:
+    token = resolve_actor_token(args)
     p = run_dir(Path(args.run_root), args.id)
     state = read_state(p)
     if state["stage"] != "collector-ready":
         raise ValueError(f"expected collector-ready, got {state['stage']}")
-    require_actor_token(state, "collector", args.actor_token)
-    result = load_json_arg(args.result)
+    require_actor_token(state, "collector", token)
+    result = load_json_arg(args.result, literal=literal_inputs(args))
     validate_shape("collector", result)
-    runtime_actor = parse_runtime_actor(args.runtime_actor)
+    runtime_actor = parse_runtime_actor(args.runtime_actor, literal=literal_inputs(args))
     (p / "collector.result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     state["collector_result"] = result
     if result["action"] == "skip":
@@ -323,7 +352,7 @@ def cmd_collector(args: argparse.Namespace) -> None:
     meta = {
         "orchestration_id": args.id,
         "capability_actor_id": state["collector_actor_id"],
-        "capability_token_fingerprint": _token_fingerprint(args.actor_token),
+        "capability_token_fingerprint": _token_fingerprint(token),
         "runtime_actor": runtime_actor or None,
         "runtime_identity_attested_by_caller": bool(runtime_actor),
         "protocol": "collector-capability-v2"
@@ -359,20 +388,21 @@ def cmd_collector(args: argparse.Namespace) -> None:
 
 
 def cmd_phase_a(args: argparse.Namespace) -> None:
+    token = resolve_actor_token(args)
     p = run_dir(Path(args.run_root), args.id)
     state = read_state(p)
     if state["stage"] != "phase-a-ready":
         raise ValueError(f"expected phase-a-ready, got {state['stage']}")
-    require_actor_token(state, "verifier", args.actor_token)
-    result = load_json_arg(args.result)
+    require_actor_token(state, "verifier", token)
+    result = load_json_arg(args.result, literal=literal_inputs(args))
     validate_shape("phase_a", result)
-    runtime_actor = parse_runtime_actor(args.runtime_actor)
+    runtime_actor = parse_runtime_actor(args.runtime_actor, literal=literal_inputs(args))
     if runtime_actor and runtime_actors_same(runtime_actor, state.get("collector_runtime_actor")):
         raise ValueError("verifier runtime actor must be different from collector runtime actor")
     meta = {
         "orchestration_id": args.id,
         "capability_actor_id": state["verifier_actor_id"],
-        "capability_token_fingerprint": _token_fingerprint(args.actor_token),
+        "capability_token_fingerprint": _token_fingerprint(token),
         "runtime_actor": runtime_actor or None,
         "runtime_identity_attested_by_caller": bool(runtime_actor),
         "protocol": "blind-verifier-capability-v2"
@@ -401,14 +431,15 @@ def cmd_phase_a(args: argparse.Namespace) -> None:
 
 
 def cmd_phase_b(args: argparse.Namespace) -> None:
+    token = resolve_actor_token(args)
     p = run_dir(Path(args.run_root), args.id)
     state = read_state(p)
     if state["stage"] != "phase-b-ready":
         raise ValueError(f"expected phase-b-ready, got {state['stage']}")
-    require_actor_token(state, "verifier", args.actor_token)
-    runtime_actor = parse_runtime_actor(args.runtime_actor)
+    require_actor_token(state, "verifier", token)
+    runtime_actor = parse_runtime_actor(args.runtime_actor, literal=literal_inputs(args))
     require_runtime_actor_continuity(state.get("verifier_runtime_actor"), runtime_actor)
-    result = load_json_arg(args.result)
+    result = load_json_arg(args.result, literal=literal_inputs(args))
     validate_shape("phase_b", result)
     ks.phase_b(
         verifier_run_id=state["verifier_run_id"], claim_id=state["claim_id"], verdict=result["verdict"],
@@ -429,9 +460,16 @@ def cmd_phase_b(args: argparse.Namespace) -> None:
 def cmd_status(args: argparse.Namespace) -> None:
     p = run_dir(Path(args.run_root), args.id)
     state = read_state(p)
-    hidden = {"evidence", "collector_token_hash", "verifier_token_hash"}
-    out = {k: v for k, v in state.items() if k not in hidden}
-    out["dir"] = str(p)
+    # Public status is deliberately a stage-specific allowlist, not a state dump.
+    # In particular the collector candidate/claim ID must remain blind until Phase A.
+    stage = state["stage"]
+    out = {"orchestration_id": state["orchestration_id"], "stage": stage}
+    if stage in {"phase-b-ready", "complete"}:
+        out["claim_id"] = state["claim_id"]
+    if stage == "complete":
+        out["result"] = state.get("commit_result")
+        out["collector_token_consumed"] = bool(state.get("collector_token_consumed"))
+        out["verifier_token_consumed"] = bool(state.get("verifier_token_consumed"))
     dump(out)
 
 
@@ -446,6 +484,7 @@ def cmd_prompt(args: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     p=argparse.ArgumentParser(description="ExteraContext two-subagent knowledge orchestration")
     p.add_argument("--run-root",default=str(DEFAULT_RUN_ROOT))
+    p.add_argument("--literal-inputs", action="store_true", help="treat every input as literal text/JSON; required for untrusted MCP calls")
     sp=p.add_subparsers(dest="cmd",required=True)
     s=sp.add_parser("reflect",help="Create a knowledge-capture orchestration and collector prompt")
     s.add_argument("--task",required=True,help="text or @file")
@@ -456,17 +495,20 @@ def parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_reflect)
     s=sp.add_parser("collector-result",help="Ingest collector JSON using the MCP-issued collector capability token")
     s.add_argument("--id",required=True); s.add_argument("--result",required=True,help="JSON or @file")
-    s.add_argument("--actor-token",required=True); s.add_argument("--model")
+    s.add_argument("--actor-token"); s.add_argument("--actor-token-stdin", action="store_true", help="read actor token from stdin")
+    s.add_argument("--model")
     s.add_argument("--runtime-actor",help="optional caller-attested runtime identity JSON or @file")
     s.set_defaults(func=cmd_collector)
     s=sp.add_parser("phase-a-result",help="Ingest blind verifier Phase A using the MCP-issued verifier capability token")
     s.add_argument("--id",required=True); s.add_argument("--result",required=True,help="JSON or @file")
-    s.add_argument("--actor-token",required=True); s.add_argument("--model")
+    s.add_argument("--actor-token"); s.add_argument("--actor-token-stdin", action="store_true", help="read actor token from stdin")
+    s.add_argument("--model")
     s.add_argument("--runtime-actor",help="optional caller-attested runtime identity JSON or @file")
     s.set_defaults(func=cmd_phase_a)
     s=sp.add_parser("phase-b-result",help="Ingest Phase B using the same verifier capability token and commit")
     s.add_argument("--id",required=True); s.add_argument("--result",required=True,help="JSON or @file")
-    s.add_argument("--actor-token",required=True); s.add_argument("--runtime-actor",help="optional caller-attested runtime identity JSON or @file")
+    s.add_argument("--actor-token"); s.add_argument("--actor-token-stdin", action="store_true", help="read actor token from stdin")
+    s.add_argument("--runtime-actor",help="optional caller-attested runtime identity JSON or @file")
     s.set_defaults(func=cmd_phase_b)
     s=sp.add_parser("status"); s.add_argument("--id",required=True); s.set_defaults(func=cmd_status)
     s=sp.add_parser("prompt"); s.add_argument("--id",required=True); s.add_argument("--phase",required=True,choices=["collector","phase-a","phase-b"]); s.set_defaults(func=cmd_prompt)

@@ -1,67 +1,28 @@
-name: Sync Knowledge pin
+name: Knowledge maintenance (manual preflight only)
 
+# No schedule, external fetch, corpus build, pin advance, or automatic publish.
+# A separate, explicitly approved change is required before enabling any of those.
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Enter I_AUTHORIZE_KNOWLEDGE_PREFLIGHT to run offline fixture checks; this does NOT collect or publish knowledge."
+        required: true
+        type: string
 
 permissions:
-  contents: write
-
-concurrency:
-  group: knowledge-sync
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  sync:
+  offline-preflight:
+    if: ${{ inputs.confirmation == 'I_AUTHORIZE_KNOWLEDGE_PREFLIGHT' }}
     runs-on: ubuntu-latest
+    env:
+      EXTERACONTEXT_AUTO_SYNC: "0"
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Resolve Knowledge main
-        id: refs
-        shell: bash
-        run: |
-          latest="$(git ls-remote https://github.com/RObotiaga/ExteraContext-Knowledge.git refs/heads/main | cut -f1)"
-          current="$(tr -d '\r\n ' < KNOWLEDGE_LOCK)"
-          echo "latest=$latest" >> "$GITHUB_OUTPUT"
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          if [ "$latest" = "$current" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Build candidate Knowledge
-        if: steps.refs.outputs.changed == 'true'
-        run: python scripts/sync_knowledge.py --ref "${{ steps.refs.outputs.latest }}"
-      - name: Run Python regressions on candidate
-        if: steps.refs.outputs.changed == 'true'
-        run: |
-          python tests/smoke.py
-          python tests/test_skill_contract.py
-          python tests/test_knowledge_writeback.py
-          python tests/test_orchestrator.py
-      - name: Run MCP regressions on candidate
-        if: steps.refs.outputs.changed == 'true'
-        working-directory: mcp
-        run: |
-          npm install --no-audit --no-fund
-          npm run check
-          npm test
-      - name: Advance Knowledge pin
-        if: steps.refs.outputs.changed == 'true'
-        shell: bash
-        run: |
-          printf '%s\n' "${{ steps.refs.outputs.latest }}" > KNOWLEDGE_LOCK
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add KNOWLEDGE_LOCK
-          git commit -m "chore(knowledge): sync ${{ steps.refs.outputs.latest }}"
-          git push
+      - name: Test isolated offline fixtures
+        run: python tests/test_ci_offline.py

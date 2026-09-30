@@ -1,0 +1,6 @@
+{
+  "run_id": "v1-001",
+  "task_id": "outgoing-account-lifecycle",
+  "mode": "A",
+  "repeat": 1
+}
