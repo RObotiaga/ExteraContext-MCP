@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExteraContext frozen Mode C corpus attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payload", "attestation"],
+  "properties": {
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attestation_schema_version", "protocol_version", "source_commit", "source_tree", "db_sha256", "db_size_bytes", "db_schema_sha256", "counts"],
+      "properties": {
+        "attestation_schema_version": {"const": 1},
+        "protocol_version": {"const": "1.1"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "db_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "db_size_bytes": {"type": "integer", "minimum": 1},
+        "db_schema_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["docs", "facts", "source_runs", "source_provenance"],
+          "properties": {
+            "docs": {"type": "integer", "minimum": 1},
+            "facts": {"type": "integer", "minimum": 1},
+            "source_runs": {"type": "integer", "minimum": 0},
+            "source_provenance": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operator", "signed_at_utc", "algorithm", "signature"],
+      "properties": {
+        "operator": {"type": "string", "minLength": 1},
+        "signed_at_utc": {"type": "string", "format": "date-time"},
+        "algorithm": {"const": "HMAC-SHA256"},
+        "signature": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

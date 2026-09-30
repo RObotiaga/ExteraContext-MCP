@@ -1,5 +1,6 @@
 {
   "run_id": "v1-001",
+  "protocol_revision": "1.1",
   "task_id": "outgoing-account-lifecycle",
   "mode": "A",
   "repeat": 1
