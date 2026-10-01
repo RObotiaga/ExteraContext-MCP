@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import json, os, subprocess, sys, tempfile
+import unittest
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -32,6 +33,10 @@ def main():
     with tempfile.TemporaryDirectory() as td0:
         td=Path(td0); db=td/'knowledge.sqlite'; rr=td/'runs'
         env=os.environ.copy(); env['EXTERACONTEXT_KNOWLEDGE_DB']=str(db); env['PYTHONUTF8']='1'; env['PYTHONIOENCODING']='utf-8'
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from prepare_ci_fixture import create_fixture
+        env.update(EXTERACONTEXT_DB=str(create_fixture(td / 'base.sqlite')),
+                   EXTERACONTEXT_AUTO_SYNC='0', EXTERACONTEXT_REQUIRE_MANIFEST='0')
         evidence=[{
           "evidence_type":"source","evidence_status":"code","source_type":"target-code",
           "repository":"owner/repo","commit":"abc123","path":"plugin.py","lines":"10-20",
@@ -150,4 +155,10 @@ def main():
 
         print('orchestrator: ok')
 
-if __name__=='__main__': main()
+class OrchestratorTests(unittest.TestCase):
+    def test_capability_stages_blinding_and_persisted_retrieval(self):
+        main()
+
+
+if __name__ == '__main__':
+    unittest.main()

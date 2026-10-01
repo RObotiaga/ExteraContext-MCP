@@ -34,7 +34,7 @@ def require_quiescent(path: Path) -> None:
             raise ValueError(f"nonempty SQLite {suffix} sidecar: {sidecar}; quiesce/checkpoint externally first")
 
 
-def validate(path: Path) -> dict[str, object]:
+def validate(path: Path, *, require_provenance: bool = True) -> dict[str, object]:
     # immutable=1 is essential: even mode=ro may create/change a WAL -shm file.
     uri = path.resolve().as_uri() + "?mode=ro&immutable=1"
     with closing(sqlite3.connect(uri, uri=True)) as connection:
@@ -44,10 +44,12 @@ def validate(path: Path) -> dict[str, object]:
         if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise ValueError(f"SQLite foreign_key_check failed: {path}")
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        missing = REQUIRED_COLUMNS.keys() - tables
+        required = {table: columns for table, columns in REQUIRED_COLUMNS.items()
+                    if require_provenance or table not in {"source_runs", "source_provenance"}}
+        missing = required.keys() - tables
         if missing:
             raise ValueError(f"missing corpus tables: {sorted(missing)}")
-        for table, columns in REQUIRED_COLUMNS.items():
+        for table, columns in required.items():
             actual = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
             if not columns <= actual:
                 raise ValueError(f"invalid {table} schema; missing columns: {sorted(columns - actual)}")
@@ -55,7 +57,7 @@ def validate(path: Path) -> dict[str, object]:
             definition = connection.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
             if "using fts5" not in definition.lower():
                 raise ValueError(f"{table} is not an FTS5 virtual table")
-        counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        counts = {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] if table in tables else 0
                   for table in ("docs", "facts", "source_runs", "source_provenance")}
         if not counts["docs"] or not counts["facts"]:
             raise ValueError("corpus has no docs or facts")

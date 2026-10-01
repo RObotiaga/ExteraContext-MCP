@@ -164,9 +164,26 @@ def ensure_db() -> None:
 
 def con() -> sqlite3.Connection:
     ensure_db()
-    c = sqlite3.connect(DB)
-    c.row_factory = sqlite3.Row
-    return c
+    from corpus_preflight import identity, verify_base
+    path = DB.expanduser().absolute()
+    generation = identity(path.stat())
+    verify_base(path)
+    # This is a verified quiescent static corpus. immutable=1 avoids SQLite WAL
+    # sidecar writes; mode=ro also refuses a file removed before connect().
+    c = sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)
+    try:
+        c.execute("PRAGMA query_only=ON")
+        c.row_factory = sqlite3.Row
+        # Establish the read snapshot before checking the path again. An atomic
+        # deployment between verification and connect must not return another DB.
+        c.execute("BEGIN")
+        c.execute("SELECT rootpage FROM sqlite_schema LIMIT 1").fetchone()
+        if identity(path.stat()) != generation:
+            raise RuntimeError("ExteraContext base database changed between verification and connection")
+        return c
+    except BaseException:
+        c.close()
+        raise
 
 
 def words(q: str) -> list[str]:
@@ -767,9 +784,17 @@ def command_doctor(args: argparse.Namespace) -> None:
     meta["db_path"] = str(configured_db)
     meta["db_size_bytes"] = size_bytes
     meta["db_sha256"] = sha256
+    from corpus_preflight import verify_base
+    meta["corpus_verification"] = verify_base(configured_db)
     meta["agent_knowledge"] = ks.stats()
     require_quiescent(configured_db)
     print(json.dumps(meta, ensure_ascii=False, indent=2))
+
+
+def command_preflight(args: argparse.Namespace) -> None:
+    ensure_db()
+    from corpus_preflight import verify_base
+    print(json.dumps(verify_base(DB, full=True), ensure_ascii=False))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -811,6 +836,8 @@ def parser() -> argparse.ArgumentParser:
 
     s = sp.add_parser("doctor", help="Check index and evidence coverage")
     s.set_defaults(func=command_doctor)
+    s = sp.add_parser("preflight", help="Validate static corpus and deployment manifest before serving")
+    s.set_defaults(func=command_preflight)
     return p
 
 

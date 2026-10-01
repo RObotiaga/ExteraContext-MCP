@@ -153,6 +153,24 @@ async function guarded(tool, fn) {
   }
 }
 
+// Only an explicitly labelled, exact version is evidence. Never reuse the first
+// number in a sentence (notably an SDK version) as the client version.
+function labelledVersion(text, labels, maxComponents) {
+  const pattern = new RegExp(`\\b(${labels})\\s+(?:(version)\\s+)?(?=([^\\s,;]+))`, 'ig');
+  const versions = new Set();
+  let invalid = false;
+  const exact = new RegExp(`^\\d+(?:\\.\\d+){1,${maxComponents - 1}}$`);
+  for (const match of text.matchAll(pattern)) {
+    const candidate = match[3].replace(/^v(?=\d)/i, '');
+    if (exact.test(candidate)) versions.add(candidate);
+    // Named clients also precede descriptions such as "ExteraGram Android".
+    // Explicit version labels, ranges and malformed numeric versions are not
+    // descriptions: they make any alternative exact version ambiguous.
+    else if (match[2] || !/^(exteragram|ayugram)$/i.test(match[1]) || /^[<>~=^]*v?\d/i.test(candidate)) invalid = true;
+  }
+  return !invalid && versions.size === 1 ? [...versions][0] : undefined;
+}
+
 function normalizeTarget(input) {
   const explicit = compactTarget(input.target || {});
   const text = input.target_text || '';
@@ -168,12 +186,12 @@ function normalizeTarget(input) {
     else if (lower.includes('java')) target.language = 'Java';
   }
   if (!target.client_version) {
-    const m = text.match(/(?:client|exteragram|ayugram)?\s*v?(\d+\.\d+(?:\.\d+){0,2})/i);
-    if (m) target.client_version = m[1];
+    const version = labelledVersion(text, 'client|app|exteragram|ayugram', 4);
+    if (version) target.client_version = version;
   }
   if (!target.sdk_version) {
-    const m = text.match(/(?:sdk|pysdk)\s*v?(\d+\.\d+(?:\.\d+){0,3})/i);
-    if (m) target.sdk_version = m[1];
+    const version = labelledVersion(text, 'sdk|pysdk', 5);
+    if (version) target.sdk_version = version;
   }
   const unknown = ['client', 'platform', 'client_version', 'sdk_version', 'language', 'plugin_format'].filter(k => !target[k]);
   return { target, unknown_fields: unknown };

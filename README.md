@@ -47,6 +47,24 @@ The scheduled workflow has not been run as part of this documentation update, an
 
 Security tests use temporary local SQLite fixtures only and cover offline copying, source preservation, manifests, invalid/corrupt schema, nonempty WAL/SHM refusal, remote-option refusal, source/destination alias refusal, and acceptance of zero-length WAL/SHM sidecars. The quiescence check refuses nonempty WAL, SHM, and journal sidecars; no new test run is claimed here. A missing/invalid installed corpus must be supplied or rebuilt through a separate trusted process; this script cannot collect or rebuild one.
 
+## Corpus preflight and offline regression tests
+
+Both transports validate the base before serving. Run `python -B scripts/query.py preflight` for the same offline check. Retrieval uses SQLite `mode=ro&immutable=1` plus `query_only=ON`; it cannot write or recreate the base. Before returning a retrieval connection, the verified file generation is checked again after its SQLite read snapshot is established; concurrent atomic replacement refuses that read. Keep the corpus and its directory protected from service-account/untrusted writes and stop readers/writers for deployment. `immutable=1` is safe only under this static, quiescent-corpus contract; never use it for the mutable overlay.
+
+When `.knowledge-manifest.json` exists beside the base, its SHA-256, byte size and schema/counts must match. Both offline-copy and release-v1 formats are supported; malformed, oversized or mismatched manifests fail closed. Set `EXTERACONTEXT_REQUIRE_MANIFEST=1` for deployments that must reject a missing manifest. Unmanaged fixture/development databases may omit it; `doctor` reports `corpus_verification.manifest_status: absent-unverified`. `verified` denotes local manifest consistency only: `commit_verified` remains false because an adjacent manifest alone does not authenticate source provenance. Verification is cached only within one Python process by DB/manifest file identity; the current subprocess-per-tool bridge rechecks each managed read, so measure this cost on large corpora before changing the architecture.
+
+From a clean checkout, Python regressions need no production corpus or DB environment variables:
+
+```sh
+python -B -m unittest discover -s tests -p 'test_*.py' -v
+python -B tests/test_ci_offline.py --suite
+python -B benchmark/agent-v1/validate.py
+```
+
+Install locked MCP dependencies with `npm --prefix mcp ci --ignore-scripts` before SDK/startup tests. For the complete Node suite, exclusively create a disposable corpus using `python -B scripts/prepare_ci_fixture.py <new-fixture.sqlite>`, set `EXTERACONTEXT_DB` to that file and `EXTERACONTEXT_KNOWLEDGE_DB` to a separate disposable overlay path, keep `EXTERACONTEXT_AUTO_SYNC=0`, then run `npm --prefix mcp test`. Missing dependencies in an optional local run are not integration evidence; CI installs them before Python and Node checks.
+
+Target-text resolution accepts exact explicitly labelled client/app/client-name and SDK versions only. Unlabelled numbers and conflicting versions stay unknown; structured target fields take precedence.
+
 ## MCP surface
 
 The server exposes target resolution, knowledge/API/usage/recipe/evidence retrieval, compatibility checks, diagnostics, and the staged write-back protocol. MCP v0.7.0 uses MCP-issued capability tokens so DeepSeek Harness does not need to expose internal child IDs. Optional runtime actor metadata can still be stored as provenance.

@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -98,5 +99,10 @@ def main():
     print("runtime-attestation: ok")
 
 
+class RuntimeAttestationTests(unittest.TestCase):
+    def test_machine_attestation_and_stdin_secret_boundaries(self):
+        main()
+
+
 if __name__ == "__main__":
-    main()
+    unittest.main()

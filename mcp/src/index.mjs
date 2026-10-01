@@ -7,6 +7,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { buildServer } from './server.mjs';
 import { VERSION } from './version.mjs';
+import { runPythonJson } from './bridge.mjs';
 
 function parseArgs(argv) {
   const out = { transport: 'stdio', host: '127.0.0.1', port: 7357, path: '/mcp', modernOnly: false, responseMode: 'auto' };
@@ -46,6 +47,7 @@ async function main() {
   const legacy = args.modernOnly ? 'reject' : 'serve';
 
   if (args.transport === 'stdio') {
+    await runPythonJson('scripts/query.py', ['preflight']);
     const handle = serveStdio(({ era }) => buildServer({ era, legacyAllowed: !args.modernOnly }), {
       legacy,
       onerror: error => console.error(`[ExteraContext MCP] ${error.stack || error.message}`)
@@ -69,6 +71,7 @@ async function main() {
   if (!token || Buffer.byteLength(token) < 32) {
     throw new Error('HTTP transport requires EXTERACONTEXT_MCP_HTTP_TOKEN (at least 32 bytes)');
   }
+  await runPythonJson('scripts/query.py', ['preflight']);
   const expectedTokenHash = createHash('sha256').update(token).digest();
   const authenticated = req => {
     const auth = req.headers.authorization;

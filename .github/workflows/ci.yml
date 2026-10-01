@@ -27,6 +27,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install pinned MCP dependencies (also required by Python startup tests)
+        working-directory: mcp
+        run: npm ci --ignore-scripts
       - name: Full Python discovery and integration (synthetic fixture only)
         run: |
           python -B tests/test_ci_offline.py --suite
@@ -38,9 +41,6 @@ jobs:
           python -B scripts/prepare_ci_fixture.py "$RUNNER_TEMP/exteracontext-ci.sqlite"
           echo "EXTERACONTEXT_DB=$RUNNER_TEMP/exteracontext-ci.sqlite" >> "$GITHUB_ENV"
           echo "EXTERACONTEXT_KNOWLEDGE_DB=$RUNNER_TEMP/exteracontext-ci-overlay.sqlite" >> "$GITHUB_ENV"
-      - name: Install pinned MCP dependencies
-        working-directory: mcp
-        run: npm ci
       - name: Full MCP integration and wire tests (synthetic fixture only)
         working-directory: mcp
         env:

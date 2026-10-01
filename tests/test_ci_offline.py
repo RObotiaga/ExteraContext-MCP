@@ -109,13 +109,6 @@ def main() -> None:
             print(completed.stderr, end="", file=sys.stderr)
             assert completed.returncode == 0, "complete Python unittest discovery failed"
 
-            # The orchestrator has an explicit integration harness outside unittest discovery.
-            completed = subprocess.run([sys.executable, "-B", str(ROOT / "tests/test_orchestrator.py")],
-                                       cwd=ROOT, env=env, text=True, encoding="utf-8",
-                                       capture_output=True, check=False)
-            print(completed.stdout, end="")
-            print(completed.stderr, end="", file=sys.stderr)
-            assert completed.returncode == 0, "orchestrator integration test failed"
     print("ci-offline: ok")
 
 
