@@ -10,6 +10,7 @@ const DEFAULT_TIMEOUT_MS = Number.isSafeInteger(configuredTimeout) && configured
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_ARG_BYTES = 256 * 1024;
 const MAX_ARG_COUNT = 128;
+const MAX_STDIN_BYTES = 64 * 1024;
 const MAX_CONCURRENT = 4;
 const MAX_PENDING = 64;
 const pending = [];
@@ -45,6 +46,10 @@ export function runPython(script, args = [], { timeoutMs = DEFAULT_TIMEOUT_MS, e
   }
   const bytes = [script, ...args].reduce((sum, arg) => sum + Buffer.byteLength(arg), 0);
   if (bytes > MAX_ARG_BYTES) return Promise.reject(new BridgeError('Python bridge arguments exceed size limit'));
+  if (stdin !== null && typeof stdin !== 'string') return Promise.reject(new BridgeError('Python bridge stdin must be a string'));
+  if (stdin !== null && Buffer.byteLength(stdin, 'utf8') > MAX_STDIN_BYTES) {
+    return Promise.reject(new BridgeError(`Python bridge stdin exceeds ${MAX_STDIN_BYTES} byte limit`));
+  }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
     return Promise.reject(new BridgeError('Invalid Python bridge timeout'));
   }
@@ -129,7 +134,7 @@ export function runPython(script, args = [], { timeoutMs = DEFAULT_TIMEOUT_MS, e
           finish(new BridgeError(redact(failure || stderr.trim() || `Python bridge exited with code ${code}`), {
             command, exitCode: code, stdout: redact(stdout), stderr: redact(stderr)
           }));
-        } else finish(null, { stdout, stderr, command });
+        } else finish(null, { stdout: redact(stdout), stderr: redact(stderr), command });
       });
       if (signal?.aborted) onAbort();
     };

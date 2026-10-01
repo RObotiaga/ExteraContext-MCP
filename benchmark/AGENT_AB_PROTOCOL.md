@@ -7,7 +7,9 @@ This benchmark measures whether ExteraContext improves an agent's real ExteraGra
 - MCP repository: record the exact commit for every run.
 - Knowledge corpus: `70f6f614227c8b02d241e7b1e72a0b6691442fd1`.
 - Protocol revision: `1.1`. Legacy pilot results must not be mixed into the final aggregate.
-- ExteraContext MCP baseline: v0.6.1.
+- ExteraContext MCP target baseline for protocol 1.1 runs: v0.7.0.
+- Every assessment must carry explicit `environment_evidence`. Modes A/B do not deploy MCP and must record `applicability: "not-applicable"` with a rationale and null MCP fields. Mode C is a hard gate: record actual MCP package version and protocol from the in-packet `doctor` JSON artifact, plus the frozen commit, database SHA-256 and attestation-file SHA-256 matching that run's canonical `RUN.json`; missing or mismatched values make aggregation fail.
+- The doctor artifact is caller-supplied evidence inspected by the evaluator. It is not cryptographically authenticated proof that the running device contacted that server; retain this human trust limitation and do not claim cryptographic deployment attestation.
 - Use the same model, model build, reasoning level, target repository commit, tool permissions and time/token budget for all modes in one comparison.
 
 Do not silently update the Knowledge corpus in the middle of a benchmark series.
@@ -125,7 +127,9 @@ Per mode report:
 - `correct_unknown` is null unless the task explicitly has `correct_unknown_applicable=true`.
 - A claimed test pass is not accepted without a rerunnable command or an existing artifact/log path.
 - The evaluator must inspect the patch/artifacts; agent self-report is not ground truth.
-- The aggregator rejects assessments not marked protocol 1.1 / assessment schema 2.
+- The aggregator rejects assessments not marked protocol 1.1 / assessment schema 2, assessments outside their prepared packet, and a packet `RUN.json` whose run identity differs from the frozen manifest.
+- Every mode requires explicit environment evidence. Mode C aggregation hard-fails if expected pin/hash/digest values, artifact paths, or doctor server-version/protocol evidence are missing or mismatched. Artifact paths must resolve inside the prepared packet. A/B records the MCP deployment as not applicable with a rationale.
+- Artifact inspection checks the supplied JSON and bytes against packet expectations; it does not cryptographically attest the live device/server execution. Report this as caller/operator trust, not machine-authenticated proof.
 
 ## Minimum suite
 

@@ -71,7 +71,7 @@ Keep these meanings distinct in conclusions and code review:
 - `secondary`: community/radar claim.
 - `unavailable`: source could not be acquired.
 
-Successful build, source inspection, or README text does not become runtime verification. MCP `record_runtime_result` currently fails closed without trusted machine attestation; never send a user/model-provided PASS as device evidence. The machine-only CLI path is explicitly gated and carries an unresolved argv-secret exposure; see [`KnowledgeStore.md`](KnowledgeStore.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
+Successful build, source inspection, or README text does not become runtime verification. MCP `record_runtime_result` currently fails closed without trusted machine attestation; never send a user/model-provided PASS as device evidence. The machine-only CLI path is explicitly gated; attestation secrets can be supplied over stdin to avoid argv exposure. See [`KnowledgeStore.md`](KnowledgeStore.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
 
 Legacy wiki facts may also carry collector/reviewer provenance from the original 2026-09-27 build. Treat that as `independent-source-reread-nonblind`: the reviewer was a separate fresh run and re-read primary material, but could see/edit the collector output. This strengthens auditability but does not upgrade `docs`/`code` to runtime evidence and is not equivalent to the blind Phase-A verifier used for new write-back.
 

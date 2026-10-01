@@ -8,11 +8,14 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import unittest
 from contextlib import closing
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 QUERY = ROOT / "scripts" / "query.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from prepare_ci_fixture import create_fixture
 
 
 def invoke(db: Path, overlay: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -30,36 +33,42 @@ def invoke(db: Path, overlay: Path, *args: str) -> subprocess.CompletedProcess[s
 
 
 def fixture(db: Path) -> None:
-    with closing(sqlite3.connect(db)) as con:
-        con.executescript("""
-            CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
-            CREATE TABLE docs(path TEXT PRIMARY KEY, title TEXT, kind TEXT, content TEXT);
-            CREATE TABLE facts(
-                id TEXT PRIMARY KEY, topic TEXT, claim TEXT, api TEXT,
-                evidence_url TEXT, evidence_path TEXT, version TEXT, status TEXT,
-                recipe TEXT, source_id TEXT, source_fact_id TEXT,
-                original_status TEXT, canonical_topic TEXT, review_status TEXT,
-                platform TEXT
-            );
-            CREATE VIRTUAL TABLE facts_fts USING fts5(
-                id UNINDEXED, topic, claim, api, recipe, source_id, version, platform
-            );
-            CREATE VIRTUAL TABLE docs_fts USING fts5(path UNINDEXED, title, content);
-            INSERT INTO meta VALUES ('facts', '1'), ('docs', '1');
-            INSERT INTO docs VALUES ('fixture.md', 'Local fixture', 'topic', 'Local only');
-            INSERT INTO facts VALUES (
-                'fixture-1', 'local', 'fixture_symbol is a local fixture',
-                'fixture_symbol', '', 'fixture.md', '', 'docs', '', 'test-fixture',
-                'fixture-1', 'docs', 'local', 'fixture', 'test'
-            );
-            INSERT INTO facts_fts(id, topic, claim, api, recipe, source_id, version, platform)
-                VALUES ('fixture-1', 'local', 'fixture_symbol is a local fixture',
-                        'fixture_symbol', '', 'test-fixture', '', 'test');
-            INSERT INTO docs_fts VALUES ('fixture.md', 'Local fixture', 'Local only');
-        """)
+    create_fixture(db)
+
+
+class FixtureHelperTests(unittest.TestCase):
+    def test_helper_creates_exact_synthetic_contents(self):
+        with tempfile.TemporaryDirectory(prefix="exteracontext-fixture-helper-") as tmp:
+            destination = Path(tmp) / "new" / "fixture.sqlite"
+            created = create_fixture(destination)
+            self.assertEqual(created, destination.absolute())
+            with closing(sqlite3.connect(created)) as con:
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM facts").fetchone()[0], 2000)
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM docs").fetchone()[0], 100)
+                self.assertIsNotNone(con.execute("SELECT 1 FROM facts WHERE api='send_request'").fetchone())
+                self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
+    def test_helper_refuses_existing_file_without_overwriting(self):
+        with tempfile.TemporaryDirectory(prefix="exteracontext-fixture-refuse-") as tmp:
+            destination = Path(tmp) / "existing.sqlite"
+            marker = b"preserve existing file"
+            destination.write_bytes(marker)
+            with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):
+                create_fixture(destination)
+            self.assertEqual(destination.read_bytes(), marker)
 
 
 def main() -> None:
+    if "--prepare-fixture" in sys.argv[1:]:
+        index = sys.argv.index("--prepare-fixture") + 1
+        if index >= len(sys.argv):
+            raise SystemExit("--prepare-fixture requires a destination path")
+        db = Path(sys.argv[index]).resolve()
+        db.parent.mkdir(parents=True, exist_ok=True)
+        fixture(db)
+        print(f"prepared synthetic CI database: {db}")
+        return
+
     with tempfile.TemporaryDirectory(prefix="exteracontext-ci-") as tmp:
         root = Path(tmp)
         db, overlay = root / "base.sqlite", root / "overlay.sqlite"
@@ -72,7 +81,7 @@ def main() -> None:
         doctor = invoke(db, overlay, "doctor")
         assert doctor.returncode == 0, doctor.stderr
         status = json.loads(doctor.stdout)
-        assert status["facts"] == 1 and status["docs"] == 1, status
+        assert status["facts"] == 2000 and status["docs"] == 100, status
         assert status["db"] == str(db), status
 
         api = invoke(db, overlay, "api", "fixture_symbol", "--format", "json")
@@ -85,16 +94,21 @@ def main() -> None:
         assert not overlay.exists(), "read-only retrieval must not create an overlay"
 
         if "--suite" in sys.argv[1:]:
-            # Existing overlay/orchestrator tests exercise query.py subprocesses;
-            # point them at this tiny base DB rather than the external corpus.
+            # Run the complete Python test discovery against an isolated synthetic
+            # base DB. This catches corpus-dependent integration tests without
+            # copying, downloading, or building any production knowledge corpus.
             env = os.environ.copy()
-            env.update({"EXTERACONTEXT_DB": str(db), "EXTERACONTEXT_AUTO_SYNC": "0",
+            env.update({"EXTERACONTEXT_DB": str(db),
+                        "EXTERACONTEXT_KNOWLEDGE_DB": str(overlay),
+                        "EXTERACONTEXT_AUTO_SYNC": "0",
                         "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
-            for script in ("tests/test_knowledge_writeback.py", "tests/test_orchestrator.py"):
-                completed = subprocess.run([sys.executable, str(ROOT / script)], cwd=ROOT, env=env,
-                                           text=True, encoding="utf-8", capture_output=True, check=False)
-                assert completed.returncode == 0, (script, completed.stdout, completed.stderr)
-                print(completed.stdout, end="")
+            completed = subprocess.run(
+                [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"],
+                cwd=ROOT, env=env, text=True, encoding="utf-8", capture_output=True, check=False)
+            print(completed.stdout, end="")
+            print(completed.stderr, end="", file=sys.stderr)
+            assert completed.returncode == 0, "complete Python unittest discovery failed"
+
     print("ci-offline: ok")
 
 

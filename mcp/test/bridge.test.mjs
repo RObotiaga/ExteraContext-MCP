@@ -49,6 +49,25 @@ test('rejects oversized argv without starting Python', async () => {
   await assert.rejects(runPython('-c', ['print(1)'], { timeoutMs: Infinity }), /Invalid Python bridge timeout/);
 });
 
+test('bounds stdin by UTF-8 bytes before queueing/spawning and never echoes oversized secrets', async () => {
+  const exactLimit = '🙂'.repeat(16_384); // exactly 64 KiB in UTF-8, but fewer JS characters
+  const exact = await runPython('-c', ['import sys; print(len(sys.stdin.readline().encode("utf-8")) - 1)'], { stdin: exactLimit });
+  assert.equal(Number(exact.stdout.trim()), Buffer.byteLength(exactLimit, 'utf8'));
+
+  const oversizedSecret = 's'.repeat(64 * 1024 + 1);
+  await assert.rejects(
+    runPython('this-python-script-must-not-be-spawned.py', [], { stdin: oversizedSecret }),
+    error => {
+      assert.match(error.message, /stdin exceeds 65536 byte limit/);
+      assert.ok(!String(error.message).includes(oversizedSecret));
+      assert.ok(!JSON.stringify(error.command ?? []).includes(oversizedSecret));
+      return true;
+    }
+  );
+  await assert.rejects(runPython('-c', ['pass'], { stdin: '🙂'.repeat(17_000) }), /stdin exceeds 65536 byte limit/);
+  await assert.rejects(runPython('-c', ['pass'], { stdin: Buffer.from('not a string') }), /stdin must be a string/);
+});
+
 test('bounds stdout and stderr separately, terminating noisy subprocesses', { timeout: 20_000 }, async () => {
   for (const stream of ['stdout', 'stderr']) {
     const code = `import sys; sys.${stream}.write('x' * 3000000); sys.${stream}.flush()`;
@@ -79,10 +98,21 @@ test('redacts capability tokens from bridge result and error commands', async ()
     return true;
   });
 
-  // Capability token passed via stdin is received by subprocess and never present in argv or command
+  // Even a successful child must not echo an argv capability into returned output.
+  const argvEcho = await runPython('-c', [
+    'import sys; print(sys.argv[-1]); print(sys.argv[-1], file=sys.stderr)',
+    '--actor-token', token
+  ]);
+  assert.equal(argvEcho.stdout.trim(), '[REDACTED]');
+  assert.equal(argvEcho.stderr.trim(), '[REDACTED]');
+  assert.ok(!JSON.stringify(argvEcho).includes(token));
+
+  // Capability token passed via stdin is received by subprocess and never present in argv or command.
   const stdinSecret = 'secret-via-stdin-9876543210';
   const stdinOutcome = await runPython('-c', ['import sys; print("token=" + sys.stdin.readline().strip())'], { stdin: stdinSecret });
-  assert.equal(stdinOutcome.stdout.trim(), `token=${stdinSecret}`);
+  assert.equal(stdinOutcome.stdout.trim(), 'token=[REDACTED]');
+  assert.equal(stdinOutcome.stderr, '');
+  assert.ok(!JSON.stringify(stdinOutcome).includes(stdinSecret));
   assert.ok(!JSON.stringify(stdinOutcome.command).includes(stdinSecret));
   assert.ok(!stdinOutcome.command.some(arg => arg.includes(stdinSecret)));
 });

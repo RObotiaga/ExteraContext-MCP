@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { createServer as createNetServer } from 'node:net';
+import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..', '..');
+const packageMetadata = JSON.parse(await readFile(resolve(root, 'mcp/package.json'), 'utf8'));
 
 async function loadSdk(t) {
   try {
@@ -61,7 +63,8 @@ test('strict stdio negotiates MCP 2026-07-28 and exposes structured tools', { ti
     assert.equal(doctor.structuredContent?.ok, true);
     assert.equal(doctor.structuredContent?.meta?.protocol_era, 'modern');
     assert.equal(doctor.structuredContent?.meta?.protocol_revision, '2026-07-28');
-    assert.equal(doctor.structuredContent?.meta?.server_version, '0.6.1');
+    assert.equal(doctor.structuredContent?.meta?.server_version, packageMetadata.version);
+    assert.equal(client.getServerVersion()?.version, packageMetadata.version);
 
     const api = await client.callTool({ name: 'find_api', arguments: { symbol: 'send_request', limit: 6 } });
     assert.notEqual(api.isError, true, JSON.stringify(api.content));

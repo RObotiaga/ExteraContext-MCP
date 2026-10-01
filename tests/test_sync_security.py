@@ -62,6 +62,22 @@ class OfflineBootstrapSecurity(unittest.TestCase):
         self.assertIn("nonempty SQLite -wal", result.stderr)
         self.assertFalse(self.db.exists())
 
+    def test_reject_nonempty_shm_before_destination_changes(self):
+        make_corpus(self.source)
+        self.db.parent.mkdir(parents=True)
+        self.db.write_bytes(b"previous destination")
+        Path(str(self.source) + "-shm").write_bytes(b"active shared memory")
+        result = self.run_sync()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nonempty SQLite -shm", result.stderr)
+        self.assertEqual(self.db.read_bytes(), b"previous destination")
+        self.assertFalse((self.db.parent / ".knowledge-manifest.json").exists())
+
+    def test_zero_length_shm_does_not_block_static_snapshot(self):
+        make_corpus(self.source)
+        Path(str(self.source) + "-shm").touch()
+        self.assertEqual(self.run_sync().returncode, 0)
+
     def test_zero_length_wal_does_not_block_static_snapshot(self):
         make_corpus(self.source)
         Path(str(self.source) + "-wal").touch()

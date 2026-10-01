@@ -4,6 +4,8 @@
   "type": "object",
   "required": [
     "benchmark",
+    "protocol_revision",
+    "run_id",
     "task_id",
     "mode",
     "repeat",
@@ -17,6 +19,13 @@
   "properties": {
     "benchmark": {
       "const": "exteracontext-agent-v1"
+    },
+    "protocol_revision": {
+      "const": "1.1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
     },
     "task_id": {
       "type": "string"

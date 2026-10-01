@@ -6,6 +6,7 @@ import { runInNewContext } from 'node:vm';
 // Exercise the actual registrations and callbacks without installing MCP/Zod or
 // launching Python. This small schema double checks the limits under test.
 const source = readFileSync(new URL('../src/server.mjs', import.meta.url), 'utf8');
+const packageMetadata = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 function schema(kind, shape) {
   const checks = [];
   const s = {
@@ -13,6 +14,7 @@ function schema(kind, shape) {
     min(n) { checks.push(v => v.length >= n); return s; },
     max(n) { checks.push(v => v.length <= n); return s; },
     refine(fn) { checks.push(fn); return s; },
+    regex(pattern) { checks.push(v => pattern.test(v)); return s; },
     optional() { const prior = s.parse; return { ...s, parse: v => v === undefined ? v : prior(v) }; },
     nullable() { const prior = s.parse; return { ...s, parse: v => v === null ? v : prior(v) }; },
     strict() { return s; },
@@ -47,7 +49,7 @@ class McpServer {
 }
 const executable = source.replace(/^import .*;\r?\n/gm, '').replaceAll('export function ', 'function ');
 runInNewContext(`${executable}\n buildServer();`, {
-  McpServer, z, Buffer,
+  McpServer, z, Buffer, VERSION: packageMetadata.version,
   BridgeError: class extends Error {},
   compactTarget: value => value,
   jsonArg: JSON.stringify,
@@ -79,6 +81,16 @@ test('runtime PASS and FAIL are rejected before any Python provenance or write',
   assert.ok(config.outputSchema.shape.ok, 'error response retains registered output envelope');
 });
 
+test('actor token schema accepts generated tokens and rejects oversized or malformed tokens pre-callback', () => {
+  const actor = tools.get('submit_collector_result').config.inputSchema.shape.actor_token;
+  actor.parse(`kc_col_${'A'.repeat(43)}`);
+  actor.parse('A'.repeat(256)); // bounded alphabetic input reaches capability authorization
+  assert.throws(() => actor.parse('A'.repeat(257)));
+  assert.throws(() => actor.parse('token with spaces and +/'));
+  assert.throws(() => actor.parse('🙂'.repeat(16)));
+  assert.equal(pythonCalls, 0);
+});
+
 test('other tools retain functional callbacks and expected envelope', async () => {
   const output = await tools.get('resolve_target').callback({ target_text: 'ExteraGram Android Python' });
   assert.equal(output.structuredContent.ok, true);
@@ -86,7 +98,7 @@ test('other tools retain functional callbacks and expected envelope', async () =
   assert.equal(output.structuredContent.meta.tool, 'resolve_target');
 
   // Verify submit_collector_result passes actor token via stdin and not in argv
-  const colToken = 'kc_col_secret_token_fixture_0123456789';
+  const colToken = `kc_col_${'A'.repeat(43)}`;
   pythonInvocations.length = 0;
   await tools.get('submit_collector_result').callback({
     orchestration_id: 'orch-1',
@@ -101,7 +113,7 @@ test('other tools retain functional callbacks and expected envelope', async () =
   assert.equal(colCall.options?.stdin, colToken, 'capability token must be supplied via stdin option');
 
   // Verify submit_verifier_phase_a passes actor token via stdin and not in argv
-  const verTokenA = 'kc_ver_secret_token_a_0123456789';
+  const verTokenA = `kc_ver_${'B'.repeat(43)}`;
   await tools.get('submit_verifier_phase_a').callback({
     orchestration_id: 'orch-1',
     actor_token: verTokenA,
@@ -114,7 +126,7 @@ test('other tools retain functional callbacks and expected envelope', async () =
   assert.equal(phaseACall.options?.stdin, verTokenA);
 
   // Verify submit_verifier_phase_b passes actor token via stdin and not in argv
-  const verTokenB = 'kc_ver_secret_token_b_0123456789';
+  const verTokenB = `kc_ver_${'C'.repeat(43)}`;
   await tools.get('submit_verifier_phase_b').callback({
     orchestration_id: 'orch-1',
     actor_token: verTokenB,

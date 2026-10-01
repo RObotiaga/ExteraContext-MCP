@@ -2,22 +2,23 @@ name: MCP CI (offline knowledge)
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  integration:
+  regression:
     runs-on: ubuntu-latest
-    # Never collect/clone/sync the external corpus as part of ordinary CI.
-    # Corpus-dependent smoke, bridge and wire tests require a separately approved,
-    # locally provided corpus DB and are intentionally excluded here.
+    # Never collect, clone, sync, or build the external knowledge corpus in CI.
+    # Python/MCP integration suites use only test_ci_offline.py's temporary fixture DB.
     env:
       EXTERACONTEXT_AUTO_SYNC: "0"
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,13 +27,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Python offline regressions (temporary fixtures only)
-        run: |
-          python tests/test_ci_offline.py --suite
-          python tests/test_skill_contract.py
-          python benchmark/agent-v1/validate.py
-      - name: MCP syntax and corpus-independent contract
+      - name: Install pinned MCP dependencies (also required by Python startup tests)
         working-directory: mcp
+        run: npm ci --ignore-scripts
+      - name: Full Python discovery and integration (synthetic fixture only)
         run: |
-          npm run check
-          node --test test/mcp-contract.test.mjs
+          python -B tests/test_ci_offline.py --suite
+          python -B tests/test_skill_contract.py
+      - name: Benchmark protocol validation
+        run: python -B benchmark/agent-v1/validate.py
+      - name: Prepare synthetic DB fixture for MCP integration
+        run: |
+          python -B scripts/prepare_ci_fixture.py "$RUNNER_TEMP/exteracontext-ci.sqlite"
+          echo "EXTERACONTEXT_DB=$RUNNER_TEMP/exteracontext-ci.sqlite" >> "$GITHUB_ENV"
+          echo "EXTERACONTEXT_KNOWLEDGE_DB=$RUNNER_TEMP/exteracontext-ci-overlay.sqlite" >> "$GITHUB_ENV"
+      - name: Full MCP integration and wire tests (synthetic fixture only)
+        working-directory: mcp
+        env:
+          EXTERACONTEXT_PYTHON: python
+        run: npm test
+      - name: Remove temporary knowledge fixtures
+        if: always()
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/exteracontext-ci.sqlite" \
+            "$RUNNER_TEMP/exteracontext-ci.sqlite-wal" \
+            "$RUNNER_TEMP/exteracontext-ci.sqlite-shm" \
+            "$RUNNER_TEMP/exteracontext-ci.sqlite-journal" \
+            "$RUNNER_TEMP/exteracontext-ci-overlay.sqlite" \
+            "$RUNNER_TEMP/exteracontext-ci-overlay.sqlite-wal" \
+            "$RUNNER_TEMP/exteracontext-ci-overlay.sqlite-shm" \
+            "$RUNNER_TEMP/exteracontext-ci-overlay.sqlite-journal"

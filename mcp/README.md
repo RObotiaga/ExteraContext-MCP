@@ -1,4 +1,4 @@
-# ExteraContext MCP v0.6.1
+# ExteraContext MCP v0.7.0
 
 ExteraContext exposes its existing Python/SQLite knowledge core as an MCP server. The MCP layer is intentionally thin: retrieval, provenance, write-back guards, orchestration, and benchmarks remain in the Python core.
 
@@ -13,12 +13,18 @@ Default serving is dual-era for compatibility: modern `2026-07-28` is available,
 
 ## Install
 
+For a new offline Linux installation, prefer the reviewed [ready-to-use local artifact](../docs/LOCAL_INSTALL.md): extract it and run `python3 install.py --start`. It includes the actual corpus, strict manifest and npm dependencies; no manual database/environment paths are needed. Node >=20 and Python >=3.11 with SQLite FTS5 are OS prerequisites. The following instructions are the separate source-checkout/development path, not a complete corpus-provisioning install.
+
 Requires Node.js 20+ and Python 3 with this ExteraContext bundle intact.
+
+Install the exact dependency tree recorded in `package-lock.json`:
 
 ```bash
 cd mcp
-npm install
+npm ci
 ```
+
+`npm ci` may download the locked packages from the configured registry; it is a dependency-install step, not part of running the tests. To require cached packages only, use `npm ci --offline` and ensure the npm cache is populated.
 
 Dependencies are pinned in `package.json`:
 
@@ -57,7 +63,9 @@ node mcp/src/index.mjs --transport http --host 127.0.0.1 --port 7357 --path /mcp
 
 HTTP starts only on loopback and **requires** `EXTERACONTEXT_MCP_HTTP_TOKEN` in the server environment (at least 32 UTF-8 bytes). Every MCP request must carry `Authorization: Bearer <token>`; missing/invalid credentials are rejected. Set the token through a protected process environment or secret manager, not in a URL, command line, checked-in config, or shell history. Protect the client-side bearer credential as well. Host/Origin checks and a loopback bind are additional boundaries, not a substitute for authentication; do not expose the port to an untrusted network. Use a trusted reverse proxy with its own access policy if remote access is required; the server itself does not permit public binds. `stdio` has no bearer handshake and assumes a trusted local launching host, process environment, and filesystem.
 
-Before starting either transport, provide a locally approved existing base database at `data/exteracontext.sqlite` or set `EXTERACONTEXT_DB` to one. For an offline copy of an already-installed corpus, run `python scripts/sync_knowledge.py --source <existing.sqlite> --db data/exteracontext.sqlite` after taking a backup and quiescing its SQLite writer. The resulting `data/.knowledge-manifest.json` records the source/destination SHA-256 and schema, but `commit_verified: false`: a repository-commit pin cannot be verified from this copy. This operation never collects or rebuilds a corpus. Do not turn on `EXTERACONTEXT_AUTO_SYNC`; startup must fail visibly if the base DB is absent. See [production readiness](../docs/PRODUCTION_READINESS.md) for deployment and startup checks.
+Provide a locally approved base database at `data/exteracontext.sqlite` or set `EXTERACONTEXT_DB` before considering the deployment ready. The MCP process performs an offline SQLite/schema and manifest-consistency preflight before starting either transport; a missing/corrupt base or invalid/mismatched manifest refuses startup. Set `EXTERACONTEXT_REQUIRE_MANIFEST=1` for strict deployments. An unmanaged fixture without a manifest is allowed by default but reported as `absent-unverified` by `doctor`; local manifest consistency never authenticates git provenance. Treat the deployment as **NOT READY** until `doctor` and a representative knowledge query both succeed in the intended environment. For a manual offline copy of an already-installed corpus, run `python scripts/sync_knowledge.py --source <existing.sqlite> --db data/exteracontext.sqlite` after taking a backup and quiescing its SQLite writer. The resulting `data/.knowledge-manifest.json` records the source/destination SHA-256 and schema, but `commit_verified: false`: a repository-commit pin cannot be verified from this manual copy.
+
+`EXTERACONTEXT_AUTO_SYNC` unset or `0` is offline and performs no network access. Only an explicit `EXTERACONTEXT_AUTO_SYNC=1` invokes `scripts/update_knowledge.py`: it downloads only hash-pinned SQLite and manifest release assets from fixed repository `RObotiaga/ExteraContext-MCP`, checks the lock hashes, manifest source commit, schema/counts and SQLite integrity, then stages validated deployment files. It never clones or executes Knowledge repository code. The current `KNOWLEDGE_LOCK` is still a legacy bare SHA without asset hashes; the updater fails closed until the first candidate passes protected publication and its lock-update PR is merged, and corresponding per-commit release assets exist. No workflow run or updater fetch is claimed here. See [production readiness](../docs/PRODUCTION_READINESS.md) for deployment, workflow controls and readiness checks.
 
 ## MCP tools
 
@@ -119,4 +127,4 @@ npm test
 - `doctor` returns schema-validated `structuredContent`;
 - the Python retrieval bridge works through a real MCP tool call.
 
-If the official client package is not installed, that integration test explicitly skips rather than pretending the wire path was tested. A skip is **not** an SDK integration pass. Corpus-independent CI does not exercise the real SDK/database wire path. The HTTP bearer boundary test provisions a test-only token and checks unauthenticated and bearer-supplied requests; the authenticated **client SDK HTTP negotiation test is explicitly skipped** pending verification of the client SDK Authorization option. This is not an HTTP SDK integration pass. Verify installed local dependencies, approved corpus, authenticated negotiation, and negative authentication cases in the intended environment before release.
+The integration tests require the MCP client/server SDK dependencies. If they are absent locally, the relevant test explicitly skips; a skip is **not** an integration pass. The stdio test launches the server and checks modern protocol negotiation, tool discovery, `doctor`, retrieval, and UTF-8 handling. The HTTP test provisions a test-only bearer token, checks an unauthenticated request is rejected, then uses `StreamableHTTPClientTransport` with `authProvider: { token: async () => token }` to negotiate MCP revision `2026-07-28` and call `doctor` over the authenticated server. CI installs dependencies from the lockfile, provisions a synthetic SQLite fixture, and runs the official SDK stdio/HTTP wire integration tests against that fixture. This exercises the real SDK/database wire path, but does not validate an approved production corpus or a deployed environment. The authenticated HTTP test's recorded local pass does not by itself establish that GitHub CI or a deployment passed it. Install dependencies with `npm ci`, then run `npm test`; verify the approved corpus and intended deployment environment separately.
