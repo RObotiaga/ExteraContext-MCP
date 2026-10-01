@@ -4,6 +4,10 @@ MCP server and mutable knowledge runtime for ExteraContext.
 
 The immutable ExteraGram/AyuGram knowledge corpus is produced separately. This repository owns retrieval, MCP serving, guarded write-back, orchestration, compatibility queries, DeepSeek Harness integration, and the separate mutable agent-knowledge store. Ordinary operation is offline: with `EXTERACONTEXT_AUTO_SYNC` unset or `0`, retrieval does not access the network. An explicit `EXTERACONTEXT_AUTO_SYNC=1` opts into the trusted, hash-pinned updater described below; it downloads only SQLite and manifest release assets from this fixed MCP GitHub repository and never clones or executes Knowledge repository code.
 
+## Ready-to-use local install
+
+For a new Linux installation without an existing corpus, use an independently reviewed local artifact containing the real corpus and locked runtime dependencies. After extraction, `python3 install.py --start` installs into the current user's `~/.local/share/exteracontext` and starts stdio MCP without DB/environment configuration. Repeat installs preserve the separate overlay/run directories; verified version activation supports rollback. Node >=20 and Python >=3.11 with SQLite FTS5 remain explicit OS prerequisites. See [local install, isolated build, acceptance and limitations](docs/LOCAL_INSTALL.md). This is not a public release and does not unblock remote AUTO_SYNC or bypass protected publication.
+
 ## Architecture
 
 ```text

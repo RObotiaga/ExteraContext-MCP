@@ -13,6 +13,8 @@ Default serving is dual-era for compatibility: modern `2026-07-28` is available,
 
 ## Install
 
+For a new offline Linux installation, prefer the reviewed [ready-to-use local artifact](../docs/LOCAL_INSTALL.md): extract it and run `python3 install.py --start`. It includes the actual corpus, strict manifest and npm dependencies; no manual database/environment paths are needed. Node >=20 and Python >=3.11 with SQLite FTS5 are OS prerequisites. The following instructions are the separate source-checkout/development path, not a complete corpus-provisioning install.
+
 Requires Node.js 20+ and Python 3 with this ExteraContext bundle intact.
 
 Install the exact dependency tree recorded in `package-lock.json`:
