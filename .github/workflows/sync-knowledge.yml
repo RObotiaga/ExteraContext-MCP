@@ -3,7 +3,7 @@ name: Knowledge candidate, validation, and protected publication
 # This workflow does not collect sources. It resolves the current upstream commit,
 # builds that exact tree in an unprivileged, no-network container, runs the project's
 # full test suites against the candidate, then waits for a protected environment
-# before publishing immutable-by-hash assets and opening a PR to develop.
+# before publishing immutable-by-hash assets and opening a PR to main.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -159,7 +159,7 @@ jobs:
       - name: Checkout integration branch
         uses: actions/checkout@v4
         with:
-          ref: develop
+          ref: main
           fetch-depth: 0
       - name: Download tested candidate
         uses: actions/download-artifact@v4
@@ -204,7 +204,7 @@ jobs:
               --repo "$GH_REPO" --title "Knowledge $SOURCE_COMMIT" \
               --notes "Immutable-by-content-hash ExteraContext Knowledge database built from exact source commit $SOURCE_COMMIT after full project tests. Do not replace assets; KNOWLEDGE_LOCK pins both hashes."
           fi
-      - name: Open PR advancing KNOWLEDGE_LOCK on develop
+      - name: Open PR advancing KNOWLEDGE_LOCK on main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -221,6 +221,6 @@ jobs:
           git add KNOWLEDGE_LOCK
           git commit -m "chore(knowledge): pin tested corpus $SOURCE_COMMIT"
           git push --force-with-lease origin "$branch"
-          gh pr create --repo "$GH_REPO" --base develop --head "$branch" \
+          gh pr create --repo "$GH_REPO" --base main --head "$branch" \
             --title "chore(knowledge): advance tested corpus to $short" \
             --body "Candidate built from exact ExteraContext-Knowledge commit $SOURCE_COMMIT in an unprivileged no-network container. Full Python, regression, benchmark, and MCP tests passed against this database. Per-commit release assets are hash-pinned in KNOWLEDGE_LOCK. Review the lock and release checksums before merge."
