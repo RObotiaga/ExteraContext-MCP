@@ -1,0 +1,469 @@
+{
+  "schema": "usefulness-pilot-1",
+  "status": "experimental bounded pilot, no significance claim",
+  "knowledge_commit": "dfaba00ba86356ec46d376a2f425ccd29a62a654",
+  "source_root": "/home/aptem/.hermes/cache/scratch/extera-install-work/knowledge-source",
+  "corpus_path": "/home/aptem/.hermes/cache/scratch/extera-install-work/tooling-corpus/exteracontext.sqlite",
+  "corpus_sha256": "199b5f4ad1563154607dcebb165b83431c4586aad66d35f569b4932b18373f59",
+  "label_provenance": "Independent manual labels from existing wiki/source prose; fact IDs mapped from source JSON BEFORE MCP baseline. Not primary upstream revalidation.",
+  "leakage_boundary": "Development families P01-P03 only guide changes. Heldout P04-P08 frozen before baseline; family disjoint, shared SDK documents mean NOT independent corpora. Evaluator groups/excerpts withheld from agents. Author sees all labels: not evaluator-blind research.",
+  "budgets": {
+    "retrieval_limit": 6,
+    "max_tool_rounds": 6,
+    "max_wall_seconds": 180,
+    "model": "gpt-6.1-sol",
+    "provider": "openai-codex",
+    "reasoning": "medium"
+  },
+  "cases": [
+    {
+      "id": "P01",
+      "family": "outgoing",
+      "split": "development",
+      "prompt": "Implement a single-file plugin that rewrites only outgoing text starting with .hello to Hello; leave media and unrelated messages untouched. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Provide code, citations and unverified assumptions.",
+      "query": "перехват исходящих сообщений изменение текста params.message",
+      "groups": [
+        [
+          "official-sdk:hook-registration"
+        ],
+        [
+          "official-sdk:outgoing-hook"
+        ],
+        [
+          "official-sdk:hook-strategies"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            46,
+            84
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "- `on_plugin_load(self)` вызывается при включении плагина и восстановлении при старте приложения; здесь регистрируют hooks/listeners и запускают фоновые работы.\n- `on_plugin_unload(self)` вызывается при выключении или завершении приложения; здесь останавливают созданные плагином worker-ы и освобождают собственные ресурсы. Xposed hooks и menu items SDK снимает автоматически, но сторонние listeners, потоки и глобальные monkey patch требуют явной очистки.\n- `on_app_event(self, event_type: AppEvent)` получает `AppEvent.START`, `STOP`, `PAUSE`, `RESUME`.\n- `create_settings(self) -> List[Any]` возвращает строки из `ui.settings`.\n\nСобытийные методы сами по себе не подписываются: вызовите регистрацию при загрузке. Основные регистрации: `self.add_hook(name, match_substring=False, priority=0)` для TL-запроса/события и `self.add_on_send_message_hook(priority=0)` для параметров исходящего сообщения.\n\n```python\nfrom base_plugin import BasePlugin, HookResult, HookStrategy\n\nclass Plugin(BasePlugin):\n    def on_plugin_load(self):\n        self.add_hook(\"TL_account_updateStatus\")\n        self.add_on_send_message_hook()\n\n    def pre_request_hook(self, request_name: str, account: int, request):\n        if request_name == \"TL_account_updateStatus\":\n            request.offline = True\n            return HookResult(strategy=HookStrategy.MODIFY, request=request)\n        return HookResult()\n\n    def post_request_hook(self, request_name: str, account: int, response, error):\n        if request_name == \"TL_messages_sendMessage\" and not error:\n            self.log(\"sent\")\n        return HookResult()\n\n    def on_update_hook(self, update_name: str, account: int, update):\n        return HookResult()\n\n    def on_updates_hook(self, container_name: str, account: int, updates):\n        return HookResult()\n\n    def on_send_message_hook(self, account: int, params):\n        return HookResult()\n```\n\n`HookResult()` оставляет событие без изменения; `HookStrategy.CANCEL` прекращает операцию; `MODIFY` возвращает изменённый объект; `MODIFY_FINAL` прекращает дальнейшую обработку плагинами с изменённым объектом. В зависимости от hook-типа объект передаётся через `HookResult.request`, `.response`, `.update`, `.updates` или `.params`. Для отправки достаточно проверить наличие `params.message`: медиа-сообщение может не иметь строкового текста. Перед долгой сетью/файлами не блокируйте hook на UI-потоке.\n\nПример из документации для преобразования `.hello Alice`: разобрать текст, изменить `params.message`, вернуть `HookResult(strategy=HookStrategy.MODIFY, params=params)`; отсутствие имени можно обработать изменением на usage-текст. Этот паттерн годится для команды, но на странице не специфицированы все возможные типы `params` и гарантии повторной доставки.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Register in load",
+        "Guard absent/non-string message",
+        "Return MODIFY with params only for matched text",
+        "Neutral HookResult otherwise"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Cancels or resends unrelated messages"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P02",
+      "family": "background-ui",
+      "split": "development",
+      "prompt": "Review a plugin that performs HTTP and JSON parsing inside a UI click callback then creates a dialog on the worker thread. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Give a corrected scheduling sketch, source citations, error handling and lifecycle caveats.",
+      "query": "фоновая сеть обработка JSON очередь обновление интерфейса диалог",
+      "groups": [
+        [
+          "official-sdk:queue-api"
+        ],
+        [
+          "official-sdk:ui-thread"
+        ],
+        [
+          "official-sdk:dialogs"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            94,
+            94
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "`run_on_queue(func, queue=PLUGINS_QUEUE, delay=0)` переносит сеть, дисковый ввод-вывод, тяжёлый разбор и вычисления с UI thread; задержка задаётся в миллисекундах. Константы: `STAGE_QUEUE`, `GLOBAL_QUEUE`, `CACHE_CLEAR_QUEUE`, `SEARCH_QUEUE`, `PHONE_BOOK_QUEUE`, `THEME_QUEUE`, `EXTERNAL_NETWORK_QUEUE`, `PLUGINS_QUEUE`. Для UI есть `run_on_ui_thread(func, delay=0)`. Она принимает обычный Python callable. `R(fn)` нужен только если Java API отдельно ожидает `Runnable`. `OnClickListener(fn)` передаёт Python callback нажатый View; `OnLongClickListener(fn)` должен вернуть bool (true потребляет событие).",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            118,
+            120
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Диалоги: `AlertDialogBuilder(activity, progress_style=ALERT_TYPE_MESSAGE, resources_provider=None)`, дальше `set_title`, `set_message`, `set_view`, `set_items`, `set_positive_button`/`set_negative_button`/`set_neutral_button`, `create`, `show`, `dismiss`, `get_dialog`, `get_button`. Listener получает `(builder, which)`. Типы — message, loading с `set_progress(0..100)`, spinner. Создание, показ и изменение диалога должны происходить на UI thread; `set_cancelable` и touch-outside лучше настраивать после `create()` или `show()`.\n\n`BulletinHelper.show_info/error/success(text, fragment=None)` и более специальные методы `show_simple`, `show_two_line`, `show_with_button`, `show_undo` показывают короткие нижние уведомления; если fragment не задан, helper ищет безопасный текущий фрагмент и fallback. Эти `show_...` сами переключаются на UI thread. Длительности документированы как 1500/2750/5000 мс (`DURATION_SHORT/LONG/PROLONG`).",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Network off UI",
+        "Dialog creation/show on UI",
+        "Handle network failure",
+        "Suppress stale result after unload"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Blocking network on UI",
+        "Dialog creation on worker"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P03",
+      "family": "cleanup",
+      "split": "development",
+      "prompt": "A plugin owns a custom worker and an external NotificationCenter listener in addition to SDK Xposed hooks. Make unload/reload safe. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Distinguish SDK-managed cleanup from plugin-owned cleanup; cite evidence and identify races.",
+      "query": "выгрузка плагина очистка worker listeners hooks reload",
+      "groups": [
+        [
+          "official-sdk:lifecycle"
+        ],
+        [
+          "official-sdk:xposed-hooks"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            46,
+            47
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "- `on_plugin_load(self)` вызывается при включении плагина и восстановлении при старте приложения; здесь регистрируют hooks/listeners и запускают фоновые работы.\n- `on_plugin_unload(self)` вызывается при выключении или завершении приложения; здесь останавливают созданные плагином worker-ы и освобождают собственные ресурсы. Xposed hooks и menu items SDK снимает автоматически, но сторонние listeners, потоки и глобальные monkey patch требуют явной очистки.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            130,
+            130
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Найти target и подписать класс hook можно на обычный app method или constructor; `self.hook_all_methods(clazz, name, hook)` и `hook_all_constructors(clazz, hook)` возвращают список unhook handles. SDK автоматически снимает hooks при unload; для досрочного снятия — `self.unhook_method(handle)`. Кодовый пример показывает также `hook_method(method, handler_instance, priority=10)`.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Stop own workers",
+        "Remove external listeners",
+        "SDK automatic Xposed cleanup",
+        "Repeated load/unload safe",
+        "Late callbacks cannot mutate disposed UI"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Assuming SDK removes all external listeners"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P04",
+      "family": "settings-persistence",
+      "split": "heldout",
+      "prompt": "Implement a persistent enabled toggle that survives reload/update; explain when changing a setting needs settings-page reload. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Use documented storage, code and citations.",
+      "query": "настройки сохранение переключатель reload update get_setting set_setting",
+      "groups": [
+        [
+          "official-sdk:settings-storage"
+        ],
+        [
+          "official-sdk:settings-row-types"
+        ],
+        [
+          "official-sdk:elyx-settings"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            112,
+            114
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Базовый интерфейс строится в `create_settings() -> List[Any]`. Типы из `ui.settings`: `Header`, `Divider`, `Switch`, `Selector`, `Input`, `Text`, `EditText`, `Custom`. Ряд с persisted value получает стабильный `key`, `default`, опционально `subtext`, `icon`, callbacks и `link_alias`. `Selector` задаёт `items` и integer index; `EditText` требует `hint` и может включать `multiline`, `max_length`, `mask`. `Text` может иметь click/long-click, создавать подстраницу через `create_sub_fragment`, иметь `accent`/`red`.\n\nИз кода читать/писать через `self.get_setting(key, default=None)` и `self.set_setting(key, value, reload_settings=False)`. `reload_settings=True` нужно, если запись меняет состав/вид строк. `export_settings()`/`import_settings(settings, reload_settings=True)` позволяют выгрузить или восстановить словарь настроек.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            196,
+            196
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Settings Elyx обёрнуты `SettingsController`: `settings.get/get_setting(key, default)`, `settings.set/set_setting(key, value, reload_settings=False)`, `settings[key]`, `settings.get_settings()`, `settings.clear_settings()`. Хранилище общее с `BasePlugin` settings, привязано к plugin ID и переживает reload/update. Рекомендуются небольшие prefs и лёгкое состояние; большие данные/cache — файлы/БД, секреты — dedicated secure storage. `reload_settings=True` нужен для перестроения открытой settings page.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Stable key and default",
+        "Use plugin-scoped settings",
+        "Persistence statement limited to documentation",
+        "reload_settings for row structure changes"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Only in-memory global for persisted value"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P05",
+      "family": "account-request",
+      "split": "heldout",
+      "prompt": "A callback from background account 2 sends a TL request while account 0 is selected in UI. Show correct account routing and response/error handling. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Cite source and note scope exceptions.",
+      "query": "запрос background account send_request callback response error",
+      "groups": [
+        [
+          "official-sdk:account-scope",
+          "official-sdk:account-client"
+        ],
+        [
+          "official-sdk:send-request"
+        ],
+        [
+          "official-sdk:notification-account"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            90,
+            100
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Все залогиненные аккаунты остаются подключёнными, включая аккаунты вне UI; hooks могут прийти от фонового аккаунта. Сигнатуры hooks содержат `account: int`. Для ответа на событие используйте этот же аккаунт: `self.client(account)` или `send_text(peer, text, account=account)`, `get_messages_controller(account)` и другие account-scoped helpers. Вызов без аккаунта использует выбранный в UI аккаунт. Документация говорит, что SDK пишет предупреждение один раз на helper, когда callback текущего account scope и UI-selected account расходятся.\n\n`get_hook_account()` возвращает текущий scope (или `None` вне callback); `self.client()` без аргумента внутри callback следует scope. Scope устанавливается в hook callback, `run_on_queue(...)`, запланированном из него, и `send_request` callbacks. `NotificationCenterDelegate.didReceivedNotification(id, account, args)` получает аккаунт, но автоматически в scope не помещается. `get_media_controller()` — документированное исключение: один общий MediaController без account parameter. Страница требует SDK `>=1.4.5.0`; не считать это частью baseline 1.4.4.3.\n\n`run_on_queue(func, queue=PLUGINS_QUEUE, delay=0)` переносит сеть, дисковый ввод-вывод, тяжёлый разбор и вычисления с UI thread; задержка задаётся в миллисекундах. Константы: `STAGE_QUEUE`, `GLOBAL_QUEUE`, `CACHE_CLEAR_QUEUE`, `SEARCH_QUEUE`, `PHONE_BOOK_QUEUE`, `THEME_QUEUE`, `EXTERNAL_NETWORK_QUEUE`, `PLUGINS_QUEUE`. Для UI есть `run_on_ui_thread(func, delay=0)`. Она принимает обычный Python callable. `R(fn)` нужен только если Java API отдельно ожидает `Runnable`. `OnClickListener(fn)` передаёт Python callback нажатый View; `OnLongClickListener(fn)` должен вернуть bool (true потребляет событие).\n\n## Клиентские запросы, ответы и сообщения\n\nИсточник: [Client Utilities](https://plugins.exteragram.app/docs/client-utils).\n\n- `send_request(request, fn, account=...)` отправляет TLObject через ConnectionsManager; `fn(response, error)` — обычная Python-функция, которую SDK оборачивает в `RequestDelegate`. Возврат — request ID. Пример строит `TLRPC.TL_messages_readMessageContents()`, добавляет `Integer(12345)` в `req.id`, отправляет и в callback проверяет `error`, затем ожидаемый тип `TLRPC.TL_messages_affectedMessages` и поля `pts`, `pts_count`.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Route to originating account",
+        "Callback response,error",
+        "Handle error before success",
+        "Notification delegate has no automatic scope"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Routes through UI-selected account without justification"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P06",
+      "family": "context-menu",
+      "split": "heldout",
+      "prompt": "Sketch adding a message-context menu action and removing it safely on unload. Target ExteraGram Android 12.10.1 / SDK 1.4.5.5. Identify callback context and distinguish third-party documentation examples from verified runtime.",
+      "query": "контекстное меню сообщения add_menu_item MenuItemData remove_menu_item",
+      "groups": [
+        [
+          "skill-faust:skill-faust-014"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/skill-faust.md",
+          "lines": [
+            12,
+            16
+          ],
+          "file_sha256": "775a38604c57da8a1e707e93ae094b01f8071642c3c147ab8211cc540c499443",
+          "excerpt": "Источник: точный репозиторий [faustyu1/exteragram-plugins-skill](https://github.com/faustyu1/exteragram-plugins-skill), не одноимённые `fossSquad/exteraSkill` или `makarworld/exteragram-plugin-skill`. Снимок дерева `07ec5d517eeade413f0885339c5d50f9d0d7910f` (ветка `main`, raw capture от 2026-09-27) зафиксирован в [snapshot.json](../../raw/skill-faust/snapshot.json); recursive tree API ответил `truncated: false` и содержит только `README.md`. Точный pinned raw запрос дал 404 для `plugin-development/SKILL.md`, `SKILL.md`, `references/go-cdylib-ctypes-pattern.md`, `templates/calculator_plugin.py`, `templates/calc.go`, `LICENSE`, `tests/test_plugin.py` и `.github/workflows/ci.yml`; см. [tree.json](../../raw/skill-faust/tree.json) и [file-manifest.json](../../raw/skill-faust/file-manifest.json). README — русскоязычный справочник с YAML-блоком skill metadata, а не исполняемый SDK. Лицензия в этой ревизии отсутствует. Все содержательные технические утверждения ниже имеют статус `docs`: они описывают заявления и примеры README, но не подтверждают реализацию в exteraGram.\n\n## Роль и покрытие\n\nREADME позиционирует материал как справочник по Python-плагинам exteraGram для Android, указывает SDK `1.4.3.6`, Python `3.11`, Chaquopy `v16` и приложение `12.5.1+`. Среди триггеров перечислены `exteraGram plugin`, русские варианты запроса, `xposed hook telegram` и `chaquopy` ([README, строки 1–16](https://github.com/faustyu1/exteragram-plugins-skill/blob/07ec5d517eeade413f0885339c5d50f9d0d7910f/README.md#L1-L16)). Это ориентир самого документа, а не независимо подтверждённая совместимость.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/skill-faust.md",
+          "lines": [
+            39,
+            39
+          ],
+          "file_sha256": "775a38604c57da8a1e707e93ae094b01f8071642c3c147ab8211cc540c499443",
+          "excerpt": "Для меню показан `MenuItemData(menu_type, text, on_click, icon, subtext, priority)`, типы `MESSAGE_CONTEXT_MENU`, `DRAWER_MENU`, `CHAT_ACTION_MENU`, `PROFILE_ACTION_MENU` и context keys для account/dialog/user/chat/message; пример сохраняет id из `add_menu_item` и вызывает `remove_menu_item` в unload callback ([строки 219–248](https://github.com/faustyu1/exteragram-plugins-skill/blob/07ec5d517eeade413f0885339c5d50f9d0d7910f/README.md#L219-L248)).",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "MenuItemType.MESSAGE_CONTEXT_MENU",
+        "Preserve registration id",
+        "Callback receives context",
+        "Remove own item or document SDK cleanup",
+        "Secondary docs not runtime proof"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Invented callback signature presented as verified"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P07",
+      "family": "donor-api",
+      "split": "heldout",
+      "prompt": "Can a plugin directly rely on Nagram ObserversGroup.removeAllObservers on ExteraGram Android 12.10.1 / SDK 1.4.5.5? Explain the donor lifecycle pattern and a safe portability decision with citations.",
+      "query": "Nagram ObserversGroup removeAllObservers cleanup account",
+      "groups": [
+        [
+          "nagram:nagram-011"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/nagram.md",
+          "lines": [
+            16,
+            18
+          ],
+          "file_sha256": "7a73d979f2fc980041369b114a8d4e89b7d371b9fbfe144510cad8ce23990482",
+          "excerpt": "Nagram — Android-клиент Telegram, основанный на NekoX и изменённый своими функциями. Это репозиторий приложения, не публичного plugin SDK. В полном рекурсивном tree snapshot нет отдельной plugin engine, каталога plugin API или документации внешнего plugin lifecycle. Поэтому внутренние классы ниже полезны как примеры реализации функций в исходниках клиента, но не задают стабильный API для ExteraGram/AyuGram-плагина. Статус `code` подтверждает наличие в снимке, а не выполнение в установленном приложении; README-факты помечены `docs`, вывод об отсутствии SDK — `inference`.\n\nREADME отделяет список дополнительных функций Nagram от унаследованного списка NekoX/Nekogram. Это важно при поиске происхождения конкретной идеи. Здесь собраны собственные классы Nagram и несколько базовых точек Telegram-клиента, через которые к ним подключается UI. README благодарит Nullgram, но это не подтверждает происхождение конкретных API. NagramX (отдельный source id `nagramx`) и Nullgram (`qwq233/Nullgram`) остаются самостоятельными источниками; NagramXTurbo (`temporaryna/NagramXTurbo`) — ещё один отдельный fork. Сходные названия/фичи и secondary radar mention о переносе Live Photo не объединялись с фактами Nagram без собственной line evidence.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/nagram.md",
+          "lines": [
+            45,
+            45
+          ],
+          "file_sha256": "7a73d979f2fc980041369b114a8d4e89b7d371b9fbfe144510cad8ce23990482",
+          "excerpt": "* `NotificationCenter.getInstance(account)` адресует события одному аккаунту; `getGlobalInstance()` отдельно предназначен для глобальных событий. `ObserversGroup` собирает регистрации delegate и удаляет их вместе. `listen(view, id, callback)` подписывает при attach, отписывает при detach и возвращает cleanup `Runnable`; add/remove требуют main thread в debug-режиме. Это API внутреннего клиента, а не Nagram plugin hook. Для UI-кода извне оно применимо только если конкретная целевая платформа официально предоставляет этот слой. См. [`NotificationCenter.java`](https://github.com/NextAlone/Nagram/blob/b8db62a65e1e4dee34d92bff412548ef628ddb06/TMessagesProj/src/main/java/org/telegram/messenger/NotificationCenter.java#L424).",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/nagram.md",
+          "lines": [
+            66,
+            66
+          ],
+          "file_sha256": "7a73d979f2fc980041369b114a8d4e89b7d371b9fbfe144510cad8ce23990482",
+          "excerpt": "Вызовы `NotificationCenter` и `ApplicationLoader` приведены как существующие host seams в исходнике Nagram. Их наличие не означает, что внешнему плагину разрешено регистрировать observer, переопределять loader или напрямую обращаться к этим классам.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Identify Nagram internal code",
+        "Explain group cleanup",
+        "ExteraGram availability unknown",
+        "Do not infer absence from empty results"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Promises donor class as supported ExteraGram SDK"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "12.10.1",
+        "sdk_version": "1.4.5.5"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    },
+    {
+      "id": "P08",
+      "family": "unknown-version",
+      "split": "heldout",
+      "prompt": "Assess whether send_request is proven compatible on ExteraGram Android 99.99.99 / SDK 99.99.99. Give documented API shape if evidence exists, but keep support unknown absent version-specific proof; propose concrete verification, not an unsupported incompatibility claim.",
+      "query": "send_request версия SDK совместимость",
+      "groups": [
+        [
+          "official-sdk:send-request"
+        ],
+        [
+          "official-sdk:version-doc-skew",
+          "official-sdk:runtime-validation"
+        ]
+      ],
+      "evidence": [
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            13,
+            15
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "Главная страница указывает версию SDK дерева `1.4.4.3`, Python `3.11` и рекомендуемую нижнюю версию приложения `12.5.1+` ([Introduction](https://plugins.exteragram.app/docs)). `12.5.1+` также стоит в Setup и примерах обычного плагина. При этом дочерние страницы документации уже описывают API новее этого baseline: multi-account требует `__sdk_version__ >= 1.4.5.0`, Elyx Quick Start/Metadata — `>= 1.4.5.3`, а intents доступны на приложении с version code `66999` (`12.6.4`) и выше ([Multi-account](https://plugins.exteragram.app/docs/multi-account), [Elyx Metadata](https://plugins.exteragram.app/docs/elyx/metadata), [Intents](https://plugins.exteragram.app/docs/intents)). Class Proxy отдельно отмечает app version code `>= 66690` для описанной функциональности ([Class Proxy](https://plugins.exteragram.app/docs/class-proxy)).\n\nПоэтому версия 1.4.4.3 — baseline, который заявляет индексная страница, а не доказательство того, что все опубликованные подстраницы или установленные клиенты относятся к одному дереву. В сравнении с PySDK `1.4.5.5`, указанным для проектов в [экспортированном радаре](../../raw/radar-export-text.md), документация содержит признаки более нового API, но сама по себе не доказывает, что конкретный runtime 1.4.5.5 реализует каждую описанную сигнатуру. Для переносимого плагина задавайте `__sdk_version__`/`sdk_version` не ниже минимальной версии нужных методов и проверяйте на целевой сборке. Это статическое исследование страниц; ни runtime, ни скачанный SDK-код здесь не запускались.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        },
+        {
+          "path": "data/wiki/sources/official-sdk.md",
+          "lines": [
+            100,
+            100
+          ],
+          "file_sha256": "aa5ecd891e3ed6c17c69bd09a808dd7a5f81b092567e37fb2ca3c3bdf1fc504a",
+          "excerpt": "- `send_request(request, fn, account=...)` отправляет TLObject через ConnectionsManager; `fn(response, error)` — обычная Python-функция, которую SDK оборачивает в `RequestDelegate`. Возврат — request ID. Пример строит `TLRPC.TL_messages_readMessageContents()`, добавляет `Integer(12345)` в `req.id`, отправляет и в callback проверяет `error`, затем ожидаемый тип `TLRPC.TL_messages_affectedMessages` и поля `pts`, `pts_count`.",
+          "level": "Knowledge-authored source synopsis; raw upstream capture absent"
+        }
+      ],
+      "must_handle": [
+        "Known documented API shape",
+        "Unknown exact support",
+        "Separate documentation from runtime",
+        "Need actual target test/source proof"
+      ],
+      "hard_fail": [
+        "Claiming Android runtime PASS without execution",
+        "Equating docs/code with exact target-version compatibility",
+        "Declares incompatible from no hit"
+      ],
+      "target": {
+        "client": "ExteraGram",
+        "platform": "Android",
+        "client_version": "99.99.99",
+        "sdk_version": "99.99.99"
+      },
+      "limit": 6,
+      "runtime_status": "NOT CLAIMED"
+    }
+  ]
+}
