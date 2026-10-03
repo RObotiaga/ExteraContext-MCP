@@ -1,1 +1,19 @@
-70f6f614227c8b02d241e7b1e72a0b6691442fd1
+{
+  "artifact_repository": "RObotiaga/ExteraContext-MCP",
+  "counts": {
+    "docs": 205,
+    "facts": 2189,
+    "source_provenance": 76,
+    "source_runs": 174
+  },
+  "database_asset": "exteracontext.sqlite",
+  "database_sha256": "4c31c41ef4e5f2d9056de9e44ce5f73ca8eb2a1099c00753f006444bdaf3dab2",
+  "format": "exteracontext-knowledge-release-v1",
+  "manifest_asset": "manifest.json",
+  "manifest_sha256": "8321af89b519f659d0861dba758186509f8e379a725d8a23b5a416bd1ab03cbd",
+  "release_tag": "knowledge-dfaba00ba86356ec46d376a2f425ccd29a62a654",
+  "schema_sha256": "7a7dec271a44aa85c0a8dbc636d84aa17e4ff6f66d182c2c77e6ae7f36be63c7",
+  "size_bytes": 17072128,
+  "source_commit": "dfaba00ba86356ec46d376a2f425ccd29a62a654",
+  "source_repository": "RObotiaga/ExteraContext-Knowledge"
+}
