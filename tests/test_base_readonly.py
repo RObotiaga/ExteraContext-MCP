@@ -20,7 +20,7 @@ spec.loader.exec_module(query)
 class BaseReadOnlyTests(unittest.TestCase):
     def test_read_connection_rejects_write_even_if_query_only_is_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
-            db = Path(tmp) / 'base with # and ?.sqlite'
+            db = Path(tmp) / 'base with # and %.sqlite'
             create_fixture(db)
             with patch.object(query, 'DB', db), patch.dict('os.environ', {'EXTERACONTEXT_AUTO_SYNC': '0'}):
                 con = query.con()

@@ -471,7 +471,7 @@ def _version_relation(fact: dict[str, Any], field: str, requested: str | None) -
     if structured:
         return "match" if structured == requested else "mismatch"
     labels = _VERSION_LABEL[field].findall(fact.get("version") or "")
-    if not labels:
+    if len(labels) != 1:
         return "unknown"
     return "match" if requested in labels else "mismatch"
 
@@ -492,7 +492,7 @@ def _explicit_donor_lookup(q: str, pool: list[dict[str, Any]]) -> bool:
 
 def _target_facts(q: str, target: str, client_version: str | None,
                   sdk_version: str | None, limit: int) -> tuple[list[dict[str, Any]], bool]:
-    target_client = "exteragram" in target.lower()
+    target_client = any(client in target.lower() for client in ("exteragram", "ayugram"))
     # Keep the historical top-k candidate set (including its dynamic overlay
     # quota); a larger search changes that quota and loses proven benchmark hits.
     pool = search_facts(q, limit=limit)

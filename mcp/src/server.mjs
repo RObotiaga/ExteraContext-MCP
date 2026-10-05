@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { BridgeError, compactTarget, jsonArg, runPythonJson, targetLabel } from './bridge.mjs';
 import { VERSION } from './version.mjs';
+import { assessEvidence, developmentTools } from './development.mjs';
 
 // Keep JSON carried in a single Python argv bounded well below the bridge's
 // 256 KiB total-argument ceiling. Measure bytes, not JS UTF-16 code units.
@@ -23,6 +24,16 @@ const TargetSchema = z.object({
   sdk_version: z.string().nullable().optional(),
   language: z.string().nullable().optional(),
   plugin_format: z.string().nullable().optional()
+}).strict();
+
+const DevelopmentTargetSchema = TargetSchema.extend({
+  package: z.string().regex(/^[A-Za-z][\w]*(?:\.[A-Za-z][\w]*)+$/).optional(),
+  version_code: z.number().int().positive().optional(),
+  android_api: z.number().int().min(1).max(100).optional(),
+  apk_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  abi: z.enum(['arm64-v8a','armeabi-v7a','x86','x86_64','universal']).optional(),
+  sdk_origin: z.enum(['runtime','manifest','user-report','unknown']).optional(),
+  variant: z.enum(['full','lite','unknown']).optional()
 }).strict();
 
 const EvidenceSchema = z.object({
@@ -249,11 +260,12 @@ function assertionPolarity(fact, symbol) {
 
 export function compatibilityFromFacts(facts, target, symbol) {
   const relevant = facts.filter(f =>
-    ['official', 'target-ecosystem'].includes(f.directness) &&
+    (['official', 'target-ecosystem'].includes(f.directness) || (f.directness === 'donor' && String(target.client).toLowerCase()==='ayugram' && String(f.source_id || '').toLowerCase().startsWith('ayugram-') && explicitTarget(f,target))) &&
     explicitTarget(f, target) && exactSymbol(f.api, symbol) &&
     (target.client_version || target.sdk_version) &&
     exactVersionField(f, 'client', target.client_version) &&
-    exactVersionField(f, 'sdk', target.sdk_version)
+    exactVersionField(f, 'sdk', target.sdk_version) &&
+    ['package','version_code','apk_sha256','android_api','abi','variant'].every(k => target[k] === undefined || target[k] === null || f[k] === target[k])
   );
   const assertions = relevant.map(f => ({ fact: f, verdict: assertionPolarity(f, symbol) })).filter(x => x.verdict);
   const verdicts = new Set(assertions.map(x => x.verdict));
@@ -304,7 +316,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Normalize an ExteraGram/AyuGram plugin target. Unknown fields remain unknown; this tool never invents versions.',
     inputSchema: z.object({
       target_text: z.string().optional(),
-      target: TargetSchema.optional()
+      target: DevelopmentTargetSchema.optional()
     }),
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
@@ -315,7 +327,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Build a task-specific evidence packet. Keep each query scoped to one technical concept for best retrieval quality.',
     inputSchema: z.object({
       query: z.string().min(2),
-      target: TargetSchema.optional(),
+      target: DevelopmentTargetSchema.optional(),
       target_text: z.string().optional(),
       limit: z.number().int().min(1).max(30).default(10)
     }),
@@ -332,37 +344,48 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     const warnings = [];
     if (resolved.unknown_fields.includes('client_version')) warnings.push('Client version is unknown; version compatibility is not established.');
     if (resolved.unknown_fields.includes('sdk_version')) warnings.push('SDK version is unknown; SDK compatibility is not established.');
-    return toolResponse('search_knowledge', { resolved_target: resolved, context: data }, warnings, protocolMeta);
+    return toolResponse('search_knowledge', { resolved_target: resolved, context: data, assessment: assessEvidence(data.facts || [], resolved.target) }, warnings, protocolMeta);
   }));
 
   server.registerTool('find_api', {
     title: 'Find Plugin API',
     description: 'Look up a concrete ExteraGram/AyuGram API symbol and its evidence.',
-    inputSchema: z.object({ symbol: z.string().min(1), limit: z.number().int().min(1).max(30).default(12) }),
+    inputSchema: z.object({ symbol: z.string().min(1), target: DevelopmentTargetSchema.optional(), limit: z.number().int().min(1).max(30).default(12) }),
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
-  }, async input => guarded('find_api', async () => toolResponse('find_api', await query('api', input.symbol, { limit: input.limit }), [], protocolMeta)));
+  }, async input => guarded('find_api', async () => {
+    const facts = await query('api', input.symbol, { limit: input.limit });
+    if (!input.target) return toolResponse('find_api', facts, ['No target supplied; these results do not establish target compatibility.'], protocolMeta);
+    const resolved = normalizeTarget(input);
+    return toolResponse('find_api', {resolved_target:resolved, facts, assessment:assessEvidence(facts,resolved.target,input.symbol)}, [], protocolMeta);
+  }));
 
   server.registerTool('find_usage', {
     title: 'Find Existing API Usage',
     description: 'Find source-backed usages/examples for an API or behavior. Results are ranked evidence, not a guarantee of target compatibility.',
-    inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(30).default(12) }),
+    inputSchema: z.object({ query: z.string().min(1), target: DevelopmentTargetSchema.optional(), limit: z.number().int().min(1).max(30).default(12) }),
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
   }, async input => guarded('find_usage', async () => {
     const all = await query('search', input.query, { limit: Math.min(input.limit * 3, 60) });
     const list = Array.isArray(all) ? all : [];
     const usages = list.filter(item => ['code', 'runtime-verified'].includes(item.status) || item.directness === 'target-ecosystem').slice(0, input.limit);
-    return toolResponse('find_usage', { usages, searched: list.length }, usages.length ? [] : ['No code/runtime usage was found; do not infer that the API is supported.'], protocolMeta);
+    const resolved = normalizeTarget(input);
+    return toolResponse('find_usage', { usages, searched: list.length, resolved_target:resolved, assessment:assessEvidence(usages,resolved.target) }, usages.length ? [] : ['No code/runtime usage was found; do not infer that the API is supported.'], protocolMeta);
   }));
 
   server.registerTool('get_recipe', {
     title: 'Get Development Recipe',
     description: 'Retrieve task recipes such as hook lifecycle cleanup, account routing, UI-thread work, or packaging.',
-    inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).default(8) }),
+    inputSchema: z.object({ query: z.string().min(1), target: DevelopmentTargetSchema.optional(), limit: z.number().int().min(1).max(20).default(8) }),
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
-  }, async input => guarded('get_recipe', async () => toolResponse('get_recipe', await query('recipe', input.query, { limit: input.limit }), [], protocolMeta)));
+  }, async input => guarded('get_recipe', async () => {
+    const recipes = await query('recipe', input.query, {limit:input.limit});
+    if (!input.target) return toolResponse('get_recipe',recipes,['Recipes are references, not target runtime verification.'],protocolMeta);
+    const resolved=normalizeTarget(input);
+    return toolResponse('get_recipe',{recipes,resolved_target:resolved,assessment:assessEvidence(recipes,resolved.target)},[],protocolMeta);
+  }));
 
   server.registerTool('get_evidence', {
     title: 'Get Fact Evidence',
@@ -377,7 +400,7 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     description: 'Conservatively check whether evidence establishes an API for an exact client/SDK version. Returns unknown instead of guessing.',
     inputSchema: z.object({
       symbol: z.string().min(1),
-      target: TargetSchema,
+      target: DevelopmentTargetSchema,
       limit: z.number().int().min(1).max(30).default(16)
     }),
     outputSchema: EnvelopeSchema,
@@ -507,5 +530,6 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     return toolResponse('doctor', { index, mutable, mcp: { server_version: VERSION, server_target_revision: '2026-07-28', protocol_era: era, protocol_revision: era === 'modern' ? '2026-07-28' : null, dual_era: legacyAllowed } }, [], protocolMeta);
   }));
 
+  developmentTools(server, {z, targetSchema:DevelopmentTargetSchema, outputSchema:EnvelopeSchema, readAnnotations:READ_ANNOTATIONS, toolResponse, guarded, protocolMeta});
   return server;
 }

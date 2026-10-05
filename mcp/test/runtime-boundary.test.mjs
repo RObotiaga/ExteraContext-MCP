@@ -11,8 +11,11 @@ function schema(kind, shape) {
   const checks = [];
   const s = {
     shape,
-    min(n) { checks.push(v => v.length >= n); return s; },
-    max(n) { checks.push(v => v.length <= n); return s; },
+    min(n) { checks.push(v => (typeof v === 'number' ? v : v.length) >= n); return s; },
+    max(n) { checks.push(v => (typeof v === 'number' ? v : v.length) <= n); return s; },
+    int() { checks.push(v => Number.isInteger(v)); return s; },
+    positive() { checks.push(v => v > 0); return s; },
+    extend(extra) { return schema('object', {...shape,...extra}); },
     refine(fn) { checks.push(fn); return s; },
     regex(pattern) { checks.push(v => pattern.test(v)); return s; },
     optional() { const prior = s.parse; return { ...s, parse: v => v === undefined ? v : prior(v) }; },
@@ -50,6 +53,7 @@ class McpServer {
 const executable = source.replace(/^import .*;\r?\n/gm, '').replaceAll('export function ', 'function ');
 runInNewContext(`${executable}\n buildServer();`, {
   McpServer, z, Buffer, VERSION: packageMetadata.version,
+  developmentTools: () => {}, // Development registrations are covered over the actual MCP wire.
   BridgeError: class extends Error {},
   compactTarget: value => value,
   jsonArg: JSON.stringify,

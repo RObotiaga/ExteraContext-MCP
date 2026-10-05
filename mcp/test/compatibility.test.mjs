@@ -21,6 +21,14 @@ const fact = {
 };
 const check = (facts, t = target, symbol = 'send_request') => compatibilityFromFacts(facts, t, symbol).verdict;
 
+test('requested APK identity cannot be inferred from a matching version; exact AyuGram evidence is eligible',()=>{
+  const exact={...target,package:'com.exteragram.messenger',version_code:70079,apk_sha256:'a'.repeat(64)};
+  assert.equal(check([fact],exact),'unknown');
+  assert.equal(check([{...fact,...exact}],exact),'compatible');
+  const ayu={...target,client:'AyuGram'};
+  assert.equal(check([{...fact,client:'AyuGram',directness:'donor',source_id:'ayugram-code'}],ayu),'compatible');
+});
+
 test('requires explicit relevant API assertion and exact client plus SDK versions', () => {
   assert.equal(check([fact]), 'compatible');
   assert.equal(check([{ ...fact, claim: 'send_request is not supported on this exact build.' }]), 'incompatible');

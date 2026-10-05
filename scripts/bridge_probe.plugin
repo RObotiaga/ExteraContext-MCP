@@ -1,0 +1,85 @@
+import json
+import uuid
+from base_plugin import BasePlugin, MethodHook
+from android_utils import run_on_ui_thread
+from java import jclass, dynamic_proxy
+
+__id__ = 'exteracontext_bridge_probe'
+__name__ = 'ExteraContext bridge probe'
+__version__ = '0.1.0'
+__description__ = 'Local Java bridge contract diagnostic. No messages or settings are read.'
+__author__ = 'ExteraContext'
+__sdk_version__ = '>=1.4.4.3'
+
+class Probe(BasePlugin):
+    def on_plugin_load(self):
+        self.live = True
+        run_on_ui_thread(self.inspect)
+
+    def on_plugin_unload(self):
+        self.live = False
+
+    def inspect(self):
+        if not self.live:
+            return
+        report = {'probe_id':str(uuid.uuid4()),'schema':1,'checks':{},'failures':[], 'boundary':'Observed local objects only; DEX reload and application feature acceptance still need separate tests.'}
+        def check(name, fn):
+            try:
+                report['checks'][name] = bool(fn())
+            except Exception as error:
+                report['checks'][name] = False
+                report['failures'].append({'check':name,'error_type':type(error).__name__})
+        context = jclass('org.telegram.messenger.ApplicationLoader').applicationContext
+        clazz = jclass('java.lang.Class')
+        loader = context.getClassLoader()
+        check('reflection_class',lambda: str(clazz.forName('android.graphics.Rect',False,loader).getName())=='android.graphics.Rect')
+        rect = jclass('android.graphics.Rect')()
+        def primitive_int():
+            field=clazz.forName('android.graphics.Rect',False,loader).getDeclaredField('left')
+            field.setInt(rect,17)
+            return field.getInt(rect)==17
+        check('primitive_int',primitive_int)
+        message = jclass('android.os.Message').obtain()
+        def primitive_long():
+            field=clazz.forName('android.os.Message',False,loader).getDeclaredField('when')
+            field.setAccessible(True)
+            field.setLong(message,1234567890123)
+            return field.getLong(message)==1234567890123
+        check('primitive_long',primitive_long)
+        def proxy():
+            calls=[]
+            class LocalRunnable(dynamic_proxy(jclass('java.lang.Runnable'))):
+                def __init__(self):
+                    super().__init__()
+                def run(self):
+                    calls.append(True)
+            LocalRunnable().run()
+            return calls==[True]
+        check('dynamic_proxy',proxy)
+        def boolean_collision():
+            name='org.telegram.messenger.SendMessagesHelper$SendMessageParams'
+            obj=jclass(name)()
+            field=clazz.forName(name,False,loader).getDeclaredField('notify')
+            field.setAccessible(True)
+            field.setBoolean(obj,True)
+            return field.getBoolean(obj) is True or bool(field.getBoolean(obj))
+        check('primitive_boolean_notify',boolean_collision)
+        owner=self
+        callbacks=[]
+        class LocalHook(MethodHook):
+            def before_hooked_method(self,param):
+                callbacks.append('before')
+                report['parameter_methods']={'setObjectExtra':callable(getattr(param,'setObjectExtra',None)),'getObjectExtra':callable(getattr(param,'getObjectExtra',None))}
+            def after_hooked_method(self,param):
+                callbacks.append('after')
+        def hook():
+            method=clazz.forName('android.view.View',False,loader).getDeclaredMethod('setTag',clazz.forName('java.lang.Object',False,loader))
+            handle=owner.hook_method(method,LocalHook())
+            try:
+                jclass('android.view.View')(context).setTag('exteracontext-local-probe')
+                return callbacks==['before','after']
+            finally:
+                owner.unhook_method(handle)
+        check('hook_invocation',hook)
+        if self.live:
+            self.log('EXTERACONTEXT_BRIDGE_PROBE '+json.dumps(report,separators=(',',':')))

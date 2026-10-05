@@ -15,6 +15,7 @@ from prepare_ci_fixture import create_fixture
 from update_knowledge import create_manifest
 
 
+@unittest.skipUnless(os.name == 'posix', 'The documented local artifact installer requires POSIX fcntl and symlink lifecycle semantics')
 class LocalInstallTests(unittest.TestCase):
     def pointer_failure_case(self, operation, failure):
         import local_install as installer
