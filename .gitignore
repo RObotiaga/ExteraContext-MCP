@@ -12,3 +12,4 @@ data/.knowledge-manifest-*.json
 
 data/.knowledge-ref
 *.zip
+.cache/

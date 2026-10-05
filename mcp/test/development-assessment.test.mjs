@@ -17,3 +17,17 @@ test('documented Class and observed wrapper discrepancy cannot silently become a
   assert.equal(result.compatibility,'conflict');
   assert.ok(result.next_checks.some(c=>c.id==='probe_bridge_contract'));
 });
+test('version alone is not exact build evidence and opposing assertions are conflicts',()=>{
+  const weak={client:'AyuGram',platform:'Android',client_version:'12.9.0'};
+  assert.equal(assessEvidence([{...weak,status:'docs'}],weak).groups.exact_target.length,0);
+  const facts=[{id:'yes',...target,status:'code',api:'testApi',claim:'testApi is supported',assertion:{key:'available',value:true}},
+    {id:'no',...target,status:'code',api:'testApi',claim:'testApi is not supported',assertion:{key:'available',value:false}}];
+  assert.equal(assessEvidence(facts,target,'testApi').compatibility,'conflict');
+});
+
+test('opposite assertions for disjoint versions are not contradictions',()=>{
+  const facts=[{id:'old',client:'AyuGram',version:'client 12.8.0',api:'testApi',claim:'testApi is not supported'},
+    {id:'new',client:'AyuGram',version:'client 12.9.0',api:'testApi',claim:'testApi is supported'}];
+  assert.equal(assessEvidence(facts,{client:'AyuGram'},'testApi').semantics_conflicts.length,0);
+  assert.equal(assessEvidence(facts.map(f=>({...f,version:'client 12.9.0'})),{client:'AyuGram'},'testApi').semantics_conflicts.length,1);
+});

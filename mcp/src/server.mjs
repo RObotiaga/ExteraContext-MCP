@@ -282,6 +282,8 @@ async function query(command, value, options = {}) {
   if (options.target) args.push('--target', options.target);
   if (options.clientVersion) args.push('--client-version', options.clientVersion);
   if (options.sdkVersion) args.push('--sdk-version', options.sdkVersion);
+  if (options.targetJson) args.push('--target-json', JSON.stringify(options.targetJson));
+  if (options.mode) args.push('--mode', options.mode);
   if (options.limit !== undefined) args.push('--limit', String(options.limit));
   if (command !== 'doctor') args.push('--format', 'json');
   return runPythonJson(args.shift(), args);
@@ -354,10 +356,10 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
   }, async input => guarded('find_api', async () => {
-    const facts = await query('api', input.symbol, { limit: input.limit });
-    if (!input.target) return toolResponse('find_api', facts, ['No target supplied; these results do not establish target compatibility.'], protocolMeta);
+    if (!input.target) return toolResponse('find_api', await query('api',input.symbol,{limit:input.limit}), ['No target supplied; these results do not establish target compatibility.'], protocolMeta);
     const resolved = normalizeTarget(input);
-    return toolResponse('find_api', {resolved_target:resolved, facts, assessment:assessEvidence(facts,resolved.target,input.symbol)}, [], protocolMeta);
+    const retrieved=await query('target-lookup',input.symbol,{limit:input.limit,targetJson:resolved.target,mode:'api'});
+    return toolResponse('find_api', {resolved_target:resolved, facts:retrieved.items, retrieval:retrieved, assessment:assessEvidence(retrieved.assessment_facts,resolved.target,input.symbol)}, [], protocolMeta);
   }));
 
   server.registerTool('find_usage', {
@@ -367,6 +369,12 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
   }, async input => guarded('find_usage', async () => {
+    if (input.target) {
+      const resolved=normalizeTarget(input);
+      const retrieved=await query('target-lookup',input.query,{limit:input.limit,targetJson:resolved.target,mode:'usage'});
+      const usages=retrieved.assessment_facts.filter(item=>['code','runtime-verified'].includes(item.status) || item.directness==='target-ecosystem').slice(0,input.limit);
+      return toolResponse('find_usage',{usages,searched:retrieved.candidate_count,resolved_target:resolved,retrieval:retrieved,assessment:assessEvidence(retrieved.assessment_facts,resolved.target,input.query)},[],protocolMeta);
+    }
     const all = await query('search', input.query, { limit: Math.min(input.limit * 3, 60) });
     const list = Array.isArray(all) ? all : [];
     const usages = list.filter(item => ['code', 'runtime-verified'].includes(item.status) || item.directness === 'target-ecosystem').slice(0, input.limit);
@@ -381,10 +389,10 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
   }, async input => guarded('get_recipe', async () => {
-    const recipes = await query('recipe', input.query, {limit:input.limit});
-    if (!input.target) return toolResponse('get_recipe',recipes,['Recipes are references, not target runtime verification.'],protocolMeta);
+    if (!input.target) return toolResponse('get_recipe',await query('recipe',input.query,{limit:input.limit}),['Recipes are references, not target runtime verification.'],protocolMeta);
     const resolved=normalizeTarget(input);
-    return toolResponse('get_recipe',{recipes,resolved_target:resolved,assessment:assessEvidence(recipes,resolved.target)},[],protocolMeta);
+    const retrieved=await query('target-lookup',input.query,{limit:input.limit,targetJson:resolved.target,mode:'recipe'});
+    return toolResponse('get_recipe',{recipes:retrieved.items,resolved_target:resolved,retrieval:retrieved,assessment:assessEvidence(retrieved.assessment_facts,resolved.target,input.query)},[],protocolMeta);
   }));
 
   server.registerTool('get_evidence', {
@@ -406,9 +414,13 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     outputSchema: EnvelopeSchema,
     annotations: READ_ANNOTATIONS
   }, async input => guarded('check_compatibility', async () => {
-    const facts = await query('api', input.symbol, { limit: input.limit });
-    const list = Array.isArray(facts) ? facts : [];
+    const retrieved=await query('target-lookup',input.symbol,{limit:input.limit,targetJson:compactTarget(input.target),mode:'api'});
+    const list = retrieved.assessment_facts || [];
     const result = compatibilityFromFacts(list, compactTarget(input.target), input.symbol);
+    if (assessEvidence(list,compactTarget(input.target),input.symbol).compatibility==='conflict' || retrieved.candidate_limit_hit) {
+      result.verdict='unknown';
+      result.reason='Conflicting or incomplete retrieved evidence requires further checks.';
+    }
     const warnings = result.verdict === 'unknown' ? ['Unknown means evidence is insufficient; it is not a compatibility failure.'] : [];
     return toolResponse('check_compatibility', { symbol: input.symbol, target: compactTarget(input.target), ...result }, warnings, protocolMeta);
   }));

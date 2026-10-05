@@ -32,5 +32,32 @@ test('exact build passport and target-aware lookup survive MCP wire validation',
     assert.ok(names.includes('list_client_releases'));
     assert.ok(names.includes('analyze_run'));
     assert.ok(names.includes('inspect_plugin_artifact'));
+    const requested=await client.callTool({name:'request_client_apk',arguments:{target,reason:'Need exact APK to inspect recorder caller'}});
+    assert.equal(requested.structuredContent.data.status,'USER_APK_REQUIRED');
+    assert.equal(requested.structuredContent.data.requirements.apk_sha256,target.apk_sha256);
+    assert.equal(requested.structuredContent.data.authentication_required,false);
+    assert.equal(requested.structuredContent.data.runtime_verified,false);
   } finally { await client.close(); rmSync(temporary,{recursive:true,force:true}); }
+});
+
+test('APK request uses modern input_required elicitation and honours user decline',async()=>{
+  const temporary=mkdtempSync(join(tmpdir(),'extera-apk-request-'));
+  const db=join(temporary,'base.sqlite');
+  const prepared=spawnSync(process.env.EXTERACONTEXT_PYTHON || 'python3',['-B','scripts/prepare_ci_fixture.py',db],{cwd:root,encoding:'utf8'});
+  assert.equal(prepared.status,0,prepared.stderr);
+  const client=new Client({name:'apk-request-regression',version:'1'},{capabilities:{elicitation:{form:{}}},versionNegotiation:{mode:{pin:'2026-07-28'}}});
+  let requests=0;
+  client.setRequestHandler('elicitation/create',async request=>{
+    requests++;
+    assert.equal(request.params.mode,'form');
+    assert.deepEqual(request.params.requestedSchema.required,['apk_path']);
+    return {action:'decline'};
+  });
+  try {
+    await client.connect(new StdioClientTransport({command:process.execPath,args:['mcp/src/index.mjs','--transport','stdio','--modern-only'],cwd:root,env:{...process.env,EXTERACONTEXT_DB:db,EXTERACONTEXT_KNOWLEDGE_DB:join(temporary,'overlay.sqlite'),EXTERACONTEXT_AUTO_SYNC:'0',EXTERACONTEXT_REQUIRE_MANIFEST:'0'},stderr:'pipe'}));
+    const result=await client.callTool({name:'request_client_apk',arguments:{target:{client:'AyuGram',platform:'Android',client_version:'12.9.0'}}});
+    assert.notEqual(result.isError,true,JSON.stringify(result));
+    assert.equal(result.structuredContent.data.status,'USER_DECLINED');
+    assert.equal(requests,1);
+  } finally {await client.close();rmSync(temporary,{recursive:true,force:true});}
 });

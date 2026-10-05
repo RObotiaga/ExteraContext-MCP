@@ -15,9 +15,12 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from decimal import Decimal, InvalidOperation
 import urllib.parse
 import urllib.request
 import zipfile
+from public_apks import list_public_apk_mirrors, download_client_apk
 
 CHANNELS = {'exteraReleases': 'ExteraGram', 'AyuGramReleases': 'AyuGram'}
 MAX_HTML = 2 * 1024 * 1024
@@ -189,8 +192,68 @@ def inspect_client_apk(data):
         raise ValueError('APK changed during inspection')
     return out
 
+
+def request_client_apk(data):
+    target=data.get('target') or {}
+    requirements={k:target[k] for k in ['client','client_version','package','version_code','apk_sha256','abi','variant'] if target.get(k) is not None}
+    result={'status':'USER_APK_REQUIRED','requirements':requirements,'reason':data.get('reason','Exact client APK is required for build-specific inspection.'),
+        'message':'Прикрепите APK нужного клиента к этому чату или укажите абсолютный путь к локальному файлу. Нужная сборка: '+json.dumps(requirements,ensure_ascii=False)+'. Имя файла не считается доказательством версии.',
+        'next_tool':'inspect_client_apk','authentication_required':False,'runtime_verified':False}
+    if data.get('path'):
+        actual=inspect_client_apk({'path':data['path']})
+        checked={k:actual.get(k)==target[k] for k in ['client_version','package','version_code','apk_sha256'] if target.get(k) is not None}
+        if target.get('abi') and target['abi']!='universal': checked['abi']=target['abi'] in actual['supported_abis']
+        missing=[k for k in ['package','version_code','apk_sha256'] if target.get(k) is None]
+        # Build variants are not established by filenames or manifest versions.
+        if target.get('variant') is not None: missing.append('variant')
+        result.update(status='APK_MISMATCH' if any(v is False for v in checked.values()) else 'APK_INSPECTED',actual=actual,matching_fields=checked,
+            target_identity_verified=not missing and all(checked.values()),unbound_fields=missing)
+        result.pop('message',None)
+    return result
+
+
+def inspect_media_packets(data):
+    """Measure actual packet timestamps including first PTS and sorted gaps."""
+    path=local_file(data['path'],1024*1024*1024)
+    digest=sha(path)
+    executable=shutil.which('ffprobe')
+    if not executable:
+        raise ValueError('ffprobe unavailable; packet continuity remains unknown')
+    streams=subprocess.run([executable,'-v','error','-show_streams','-show_entries','stream=index,codec_type,codec_name,duration','-of','json',str(path)],capture_output=True,timeout=30,shell=False)
+    if streams.returncode or len(streams.stdout)>64000:
+        raise ValueError('Cannot obtain bounded media stream identity')
+    stream_data=json.loads(streams.stdout)['streams']
+    timestamps={s['index']:[] for s in stream_data if s.get('codec_type') in {'video','audio'}}
+    with tempfile.TemporaryFile() as output:
+        result=subprocess.run([executable,'-v','error','-show_packets','-show_entries','packet=stream_index,pts_time','-of','csv=p=0',str(path)],stdout=output,stderr=subprocess.DEVNULL,timeout=45,shell=False)
+        if result.returncode or output.tell()>64*1024*1024:
+            raise ValueError('Packet inspection failed or exceeded bounds')
+        output.seek(0)
+        for line in output:
+            parts=line.decode('ascii',errors='strict').strip().split(',')
+            if len(parts)<2 or not parts[0].isdigit(): continue
+            index=int(parts[0])
+            if index not in timestamps: continue
+            try: pts=int(Decimal(parts[1])*1_000_000)
+            except (InvalidOperation,ValueError,OverflowError):
+                raise ValueError('Media has packets without valid PTS') from None
+            timestamps[index].append(pts)
+    tracks=[]
+    for s in stream_data:
+        if s['index'] not in timestamps: continue
+        pts=sorted(timestamps[s['index']])
+        track={'mime':s['codec_type']+'/'+str(s.get('codec_name','unknown')),'samples':len(pts)}
+        if pts:
+            track.update(firstPtsUs=pts[0],maxPtsUs=pts[-1],maxGapUs=max((b-a for a,b in zip(pts,pts[1:])),default=0))
+        tracks.append(track)
+    if sha(path)!=digest:
+        raise ValueError('Media changed during packet inspection')
+    return {'path':str(path),'media_sha256':digest,'measurement':{'bytesBefore':path.stat().st_size,'bytesAfter':path.stat().st_size,'tracks':tracks},
+        'boundary':'Actual local file packets measured; frozen images, silence and target application execution are not verified.'}
+
 def inspect_plugin_artifact(data):
     path=local_file(data['path'],MAX_ARTIFACT)
+    artifact_digest=sha(path)
     errors, warnings=[],[]
     archived_dex=[]
     if zipfile.is_zipfile(path):
@@ -234,23 +297,31 @@ def inspect_plugin_artifact(data):
         warnings.append('Source references __file__; validate installer environment without that variable')
     if re.search(r'from\s+elyx\s+import\s+.*\bassets\b',source):
         warnings.append('elyx.assets availability requires target SDK probe')
-    return {'path':str(path),'artifact_sha256':sha(path),'version':constants.get('__version__'),'dex_sha256':digest,
+    if sha(path)!=artifact_digest:
+        raise ValueError('Plugin artifact changed during inspection')
+    return {'path':str(path),'artifact_sha256':artifact_digest,'python_sha256':hashlib.sha256(source.encode()).hexdigest(),'version':constants.get('__version__'),'dex_sha256':digest,
         'syntax':'PASS','artifact_status':'FAIL' if errors else 'PASS','errors':errors,'warnings':warnings,
         'runtime_status':'PENDING','boundary':'Static artifact checks only; no imports, installer or target client executed.'}
 
 def probe_bridge_contract(data):
-    required=['reflection_class','primitive_int','primitive_long','dynamic_proxy','primitive_boolean_notify','hook_invocation']
+    required=['reflection_class','find_class_metadata','primitive_int','primitive_long','dynamic_proxy','primitive_boolean_notify','hook_invocation','independent_dex_reload','actual_sdk_identity']
     report=data.get('report')
     if report is None:
         source=Path(__file__).with_name('bridge_probe.plugin').read_text(encoding='utf-8')
+        fixture=json.loads(Path(__file__).with_name('fixtures').joinpath('bridge-probe.json').read_text(encoding='utf-8'))
+        dex=base64.b64decode(fixture['dex_base64'],validate=True)
+        java=Path(__file__).with_name('fixtures').joinpath('BridgeProbe.java').read_text(encoding='utf-8').encode()
+        if hashlib.sha256(dex).hexdigest()!=fixture['dex_sha256'] or hashlib.sha256(java).hexdigest()!=fixture['source_sha256']:
+            raise ValueError('Diagnostic DEX fixture changed; rebuild before preparing probe')
+        source=source.replace('EMBEDDED_DEX = None','EMBEDDED_DEX = '+repr(fixture['dex_base64'])).replace('EMBEDDED_SHA256 = None','EMBEDDED_SHA256 = '+repr(fixture['dex_sha256']))
         ast.parse(source)
         return {'status':'PENDING','probe_source':source,'probe_sha256':hashlib.sha256(source.encode()).hexdigest(),
             'required_checks':required,'instructions':'Install this standalone diagnostic plugin through the native client flow, enable it once, and import the EXTERACONTEXT_BRIDGE_PROBE JSON. Unload it afterwards.',
-            'remaining_checks':['actual_sdk_identity','independent_dex_reload','application_feature_scenario'], 'runtime_verified':False,'boundary':BOUNDARY}
+            'remaining_checks':['execute_in_exact_client','actual_sdk_identity','application_feature_scenario'], 'runtime_verified':False,'boundary':BOUNDARY}
     if not isinstance(report,dict) or report.get('schema')!=1 or not isinstance(report.get('checks'),dict):
         raise ValueError('Invalid bridge probe report')
     checks=report['checks']
-    return {'status':'FAIL' if any(checks.get(k) is False for k in required) else 'EVIDENCE_CONSISTENT' if all(checks.get(k) is True for k in required) else 'PENDING',
+    return {'status':'FAIL' if report.get('bootstrap_failure') or any(checks.get(k) is False for k in required) else 'EVIDENCE_CONSISTENT' if all(checks.get(k) is True for k in required) and report.get('sdk_runtime') else 'PENDING',
         'missing_checks':[k for k in required if k not in checks], 'observed_checks':{k:checks.get(k) for k in required},
         'parameter_methods':report.get('parameter_methods',{}),'runtime_verified':False,'boundary':BOUNDARY}
 
@@ -290,8 +361,9 @@ def analyze_run(data):
         if not line.strip(): continue
         try:
             event=json.loads(line[line.index('{'):])
-            if not isinstance(event,dict) or not isinstance(event.get('session'),str) or not isinstance(event.get('event'),str): raise ValueError('Invalid event envelope')
-            if event.get('event')=='camera.source.audit':
+            if not isinstance(event,dict) or not isinstance(event.get('session'),str) or not isinstance(event.get('event'),str) or type(event.get('seq')) is not int or event['seq']<1:
+                raise ValueError('Invalid event envelope')
+            if event.get('event') in {'camera.source.audit','media.source.audit'}:
                 measurement=event.get('measurement')
                 if not isinstance(measurement,dict) or not isinstance(measurement.get('tracks'),list) or any(not isinstance(t,dict) for t in measurement['tracks']):
                     raise ValueError('Invalid media audit')
@@ -304,39 +376,53 @@ def analyze_run(data):
     for session,events in sessions.items():
         versions=sorted({str(e['version']) for e in events if e.get('version')})
         seq=[e.get('seq') for e in events if type(e.get('seq')) is int]
-        gaps=[{'after':a,'before':b} for a,b in zip(seq,seq[1:]) if b!=a+1]
+        gaps=([{'after':0,'before':seq[0]}] if seq and seq[0]!=1 else [])+[{'after':a,'before':b} for a,b in zip(seq,seq[1:]) if b!=a+1]
         expected=data.get('expected_artifact') or {}
-        load=next((e for e in events if e.get('event')=='plugin.load.start'),None)
-        identity='PENDING' if not load or not expected.get('version') or not expected.get('dex_sha256') else 'PASS' if versions==[expected['version']] and load.get('dex_sha256')==expected['dex_sha256'] else 'FAIL'
+        loads=[e for e in events if e.get('event')=='plugin.load.start']
+        identity='PENDING'
+        requested=[k for k in ['version','dex_sha256','python_sha256','artifact_sha256','package','version_code','apk_sha256'] if expected.get(k) is not None]
+        if loads and requested:
+            if any(e.get(k) is not None and e[k]!=expected[k] for e in loads for k in requested) or (expected.get('version') and versions!=[expected['version']]):
+                identity='FAIL'
+            elif all(e.get(k)==expected[k] for e in loads for k in requested) and 'version' in requested and 'dex_sha256' in requested:
+                identity='PASS'
+        installed_identity=identity if all(expected.get(k) is not None for k in ['artifact_sha256','python_sha256','package','version_code','apk_sha256']) else 'PENDING'
         jobs=[]
         for job in sorted({e['job'] for e in events if isinstance(e.get('job'),str)}):
             trace=[e for e in events if e.get('job')==job]
-            source=next((e for e in trace if e.get('event')=='camera.source.audit' and e.get('phase')=='camera_file'),None)
-            copy=next((e for e in trace if e.get('event')=='camera.source.audit' and e.get('phase')=='saved_copy'),None)
-            finding={'job':job,'queue_done':any(e.get('event')=='queue.done' for e in trace),'media_status':'PENDING','findings':[]}
+            source=next((e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase') in {'camera_file','source_file'}),None)
+            copy=next((e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase')=='saved_copy'),None)
+            finding={'job':job,'source_kind':next((e.get('source') for e in trace if e.get('event')=='queue.created'),None),'queue_done':any(e.get('event')=='queue.done' for e in trace),'media_status':'PENDING','findings':[]}
             if source:
                 tracks=source.get('measurement',{}).get('tracks',[])
                 video=next((t for t in tracks if str(t.get('mime','')).startswith('video/')),None)
                 audio=next((t for t in tracks if str(t.get('mime','')).startswith('audio/')),None)
                 expected_us=source.get('expected_us')
                 if type(expected_us) is int and expected_us>0 and video and audio and all(type(t.get('samples')) is int and t['samples']>0 for t in [video,audio]):
-                    finding['media_status']='FAIL' if any(type(t.get('maxPtsUs')) is not int or expected_us-t['maxPtsUs']>1_000_000 for t in [video,audio]) else 'PACKET_COVERAGE_OBSERVED'
+                    # AAC encoder priming can put the first packet slightly before
+                    # zero. Keep a bounded tolerance without accepting late starts.
+                    bad=any(type(t.get('firstPtsUs')) is not int or not -1_000_000<=t['firstPtsUs']<=1_000_000 or type(t.get('maxPtsUs')) is not int or not expected_us-1_000_000<=t['maxPtsUs']<=expected_us+1_000_000 or t['samples']<2 for t in [video,audio])
+                    gap_known=all(type(t.get('maxGapUs')) is int and 0<=t['maxGapUs']<=1_000_000 for t in [video,audio])
+                    gap_bad=any(type(t.get('maxGapUs')) is int and t['maxGapUs']>1_000_000 for t in [video,audio])
+                    finding['media_status']='FAIL' if bad or gap_bad else 'PACKET_COVERAGE_OBSERVED' if gap_known else 'PENDING'
                     if finding['media_status']=='FAIL': finding['findings'].append('Original camera packets do not cover expected recording; loss occurred before saved copy/split/send.')
                 if copy:
                     a,b=source.get('measurement',{}),copy.get('measurement',{})
                     finding['copy_status']='PASS' if type(a.get('bytesAfter')) is int and a['bytesAfter']>0 and a.get('tracks')==b.get('tracks') and a.get('bytesAfter')==b.get('bytesAfter') and a.get('bytesBefore')==a.get('bytesAfter') and b.get('bytesBefore')==b.get('bytesAfter') else 'FAIL'
-            parts={e.get('part'):e.get('duration_us') for e in trace if e.get('event')=='split.part' and type(e.get('part')) is int and type(e.get('duration_us')) is int}
+            part_events=[e for e in trace if e.get('event')=='split.part']
+            parts={e.get('part'):e.get('duration_us') for e in part_events if type(e.get('part')) is int and type(e.get('duration_us')) is int}
             acknowledged={e.get('acknowledged_part') for e in trace if e.get('event')=='send.ack' and type(e.get('acknowledged_part')) is int}
             finding['parts_status']='PENDING'
             if parts:
                 expected_us=source.get('expected_us') if source else None
-                sequential=set(parts)==set(range(1,len(parts)+1))
+                totals=[e.get('count') if e.get('event')=='split.done' else e.get('total') for e in trace if e.get('event') in {'split.done','queue.done'}]
+                sequential=len(parts)==len(part_events) and set(parts)==set(range(1,len(parts)+1)) and bool(totals) and all(type(n) is int and n==len(parts) for n in totals)
                 if type(expected_us) is int and expected_us>0:
                     finding['parts_status']='PASS' if sequential and abs(sum(parts.values())-expected_us)<=1_000_000 and all(0<d<=60_000_000 for d in parts.values()) else 'FAIL'
                 finding['ack_status']='PASS' if sequential and set(parts).issubset(acknowledged) else 'PENDING'
             if finding['queue_done'] and finding['media_status']=='PENDING': finding['findings'].append('queue.done establishes queue completion only; source media preservation remains unknown.')
             jobs.append(finding)
-        results.append({'session':session,'versions':versions,'sequence_gaps':gaps,'artifact_identity':identity,'jobs':jobs})
+        results.append({'session':session,'versions':versions,'sequence_gaps':gaps,'artifact_identity':identity,'installed_identity':installed_identity,'load_generations':len(loads),'jobs':jobs})
     return {'sessions':results,'invalid_lines':invalid,'trace_complete':not invalid and bool(results) and all(not s['sequence_gaps'] for s in results), 'runtime_verified':False,'boundary':BOUNDARY}
 
 def verify_feature(data):
@@ -344,9 +430,20 @@ def verify_feature(data):
     observations=data.get('observations') or {}
     required=['motion_after_minute','speech_after_minute','continuous_part_boundary']
     gates={'trace_integrity':result['trace_complete'], 'artifact_identity':bool(result['sessions']) and all(s['artifact_identity']=='PASS' for s in result['sessions']),
+        'installed_identity':bool(result['sessions']) and all(s['installed_identity']=='PASS' for s in result['sessions']),
         'packet_coverage':False,'copy_preservation':False,'queue_completion':False,
         'parts_coverage':False,'parts_acknowledged':False,**{key:observations.get(key) is True for key in required}}
     jobs=[j for s in result['sessions'] for j in s['jobs']]
+    if data['feature']=='import_round':
+        required=['square_crop_matches_preview','sound_preserved','continuous_part_boundary','gallery_route','message_route','fallback_route']
+        for key in ['motion_after_minute','speech_after_minute']:
+            gates.pop(key,None)
+        gates.update({key:observations.get(key) is True for key in required})
+        gates['import_source']=bool(jobs) and all(j['source_kind']=='imported' for j in jobs)
+    elif data['feature']=='long_round_camera':
+        gates['camera_source']=bool(jobs) and all(j['source_kind']=='camera' for j in jobs)
+    else:
+        raise ValueError('Unknown feature')
     if jobs:
         gates.update(packet_coverage=all(j['media_status']=='PACKET_COVERAGE_OBSERVED' for j in jobs),
             copy_preservation=all(j.get('copy_status')=='PASS' for j in jobs),queue_completion=all(j['queue_done'] for j in jobs),
@@ -357,7 +454,7 @@ def verify_feature(data):
         'boundary':'Caller-supplied logs and observations are evaluated, not independently attested. No runtime-verified knowledge is created.'}
 
 def main():
-    methods={f.__name__:f for f in [list_client_releases,inspect_client_apk,inspect_plugin_artifact,probe_bridge_contract,analyze_hook_impact,analyze_run,verify_feature]}
+    methods={f.__name__:f for f in [request_client_apk,list_client_releases,list_public_apk_mirrors,download_client_apk,inspect_client_apk,inspect_media_packets,inspect_plugin_artifact,probe_bridge_contract,analyze_hook_impact,analyze_run,verify_feature]}
     raw=sys.stdin.buffer.read(64001)
     if len(raw)>64000: raise ValueError('Request exceeds 64000 bytes')
     data=json.loads(raw)

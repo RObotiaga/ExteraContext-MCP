@@ -1,5 +1,7 @@
 import json
 import uuid
+import base64
+import hashlib
 from base_plugin import BasePlugin, MethodHook
 from android_utils import run_on_ui_thread
 from java import jclass, dynamic_proxy
@@ -10,19 +12,30 @@ __version__ = '0.1.0'
 __description__ = 'Local Java bridge contract diagnostic. No messages or settings are read.'
 __author__ = 'ExteraContext'
 __sdk_version__ = '>=1.4.4.3'
+EMBEDDED_DEX = None
+EMBEDDED_SHA256 = None
 
 class Probe(BasePlugin):
     def on_plugin_load(self):
         self.live = True
-        run_on_ui_thread(self.inspect)
+        run_on_ui_thread(self.run_probe)
 
     def on_plugin_unload(self):
         self.live = False
 
+    def run_probe(self):
+        if not self.live:
+            return
+        try:
+            self.inspect()
+        except Exception as error:
+            if self.live:
+                self.log('EXTERACONTEXT_BRIDGE_PROBE '+json.dumps({'schema':1,'checks':{},'bootstrap_failure':type(error).__name__}))
+
     def inspect(self):
         if not self.live:
             return
-        report = {'probe_id':str(uuid.uuid4()),'schema':1,'checks':{},'failures':[], 'boundary':'Observed local objects only; DEX reload and application feature acceptance still need separate tests.'}
+        report = {'probe_id':str(uuid.uuid4()),'schema':1,'checks':{},'failures':[], 'sdk_runtime':None,'dex_sha256':EMBEDDED_SHA256,'boundary':'Observed bridge contracts; application feature acceptance requires its own scenario.'}
         def check(name, fn):
             try:
                 report['checks'][name] = bool(fn())
@@ -32,6 +45,16 @@ class Probe(BasePlugin):
         context = jclass('org.telegram.messenger.ApplicationLoader').applicationContext
         clazz = jclass('java.lang.Class')
         loader = context.getClassLoader()
+        report['target']={'package':str(context.getPackageName()),'android_api':int(jclass('android.os.Build$VERSION').SDK_INT)}
+        info=context.getPackageManager().getPackageInfo(context.getPackageName(),0)
+        report['target']['client_version']=str(info.versionName)
+        report['target']['version_code']=int(info.getLongVersionCode())
+        def helper_metadata():
+            from hook_utils import find_class
+            resolved=find_class('android.graphics.Rect')
+            report['find_class_methods']={name:callable(getattr(resolved,name,None)) for name in ['getDeclaredField','getDeclaredMethod','getClass']}
+            return str(resolved.getDeclaredField('left').getName())=='left'
+        check('find_class_metadata',helper_metadata)
         check('reflection_class',lambda: str(clazz.forName('android.graphics.Rect',False,loader).getName())=='android.graphics.Rect')
         rect = jclass('android.graphics.Rect')()
         def primitive_int():
@@ -46,6 +69,22 @@ class Probe(BasePlugin):
             field.setLong(message,1234567890123)
             return field.getLong(message)==1234567890123
         check('primitive_long',primitive_long)
+        dex=base64.b64decode(EMBEDDED_DEX,validate=True)
+        if hashlib.sha256(dex).hexdigest()!=EMBEDDED_SHA256:
+            check('independent_dex_reload',lambda:False)
+            self.log('EXTERACONTEXT_BRIDGE_PROBE '+json.dumps(report,separators=(',',':')))
+            return
+        loaders=[]
+        classes=[]
+        for _ in range(2):
+            fresh=jclass('dalvik.system.InMemoryDexClassLoader')(jclass('java.nio.ByteBuffer').wrap(dex),loader)
+            loaders.append(fresh)
+            classes.append(fresh.loadClass('app.exteracontext.probe.BridgeProbe'))
+        def reload():
+            first=classes[0].getDeclaredMethod('marker')
+            second=classes[1].getDeclaredMethod('marker')
+            return not classes[0].equals(classes[1]) and int(first.invoke(None))==1 and int(first.invoke(None))==2 and int(second.invoke(None))==1
+        check('independent_dex_reload',reload)
         def proxy():
             calls=[]
             class LocalRunnable(dynamic_proxy(jclass('java.lang.Runnable'))):
@@ -53,8 +92,9 @@ class Probe(BasePlugin):
                     super().__init__()
                 def run(self):
                     calls.append(True)
-            LocalRunnable().run()
-            return calls==[True]
+            method=classes[0].getDeclaredMethod('dispatch',clazz.forName('java.lang.Runnable',False,loader))
+            value=method.invoke(None,LocalRunnable())
+            return calls==[True] and str(value)=='java-dispatched'
         check('dynamic_proxy',proxy)
         def boolean_collision():
             name='org.telegram.messenger.SendMessagesHelper$SendMessageParams'

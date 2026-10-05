@@ -615,6 +615,40 @@ def command_search(args: argparse.Namespace) -> None:
             print(emit_fact(r, i), "\n")
 
 
+def command_target_lookup(args: argparse.Namespace) -> None:
+    """Rank target evidence before the presentation limit; retain conflict context.
+
+    Bounded retrieval is reported explicitly and never treated as complete coverage.
+    Existing unscoped commands and benchmark quotas are unchanged.
+    """
+    target=json.loads(args.target_json)
+    if not isinstance(target,dict):
+        raise ValueError('Target must be an object')
+    cap=500
+    if args.mode=='api':
+        pool=api_lookup(args.query,cap+1)
+    elif args.mode=='recipe':
+        pool=search_docs(args.query,cap+1,kind='recipe')
+    else:
+        pool=search_facts(args.query,cap+1)
+    def rank(f):
+        matches=0
+        mismatches=0
+        for field,value in target.items():
+            if field in {'client_version','sdk_version'}:
+                relation=_version_relation(f,field.removesuffix('_version'),value)
+            else:
+                actual=f.get(field)
+                relation='unknown' if actual is None or actual=='' else 'match' if str(actual).lower()==str(value).lower() else 'mismatch'
+            matches+=relation=='match'
+            mismatches+=relation=='mismatch'
+        return (mismatches==0,matches,f.get('score',0))
+    pool.sort(key=rank,reverse=True)
+    selected=pool[:args.limit]
+    print(json.dumps({'items':selected,'assessment_facts':pool[:cap],'candidate_count':len(pool),
+        'candidate_limit_hit':len(pool)>cap,'coverage':'bounded retrieval; not complete corpus coverage'},ensure_ascii=False))
+
+
 def command_api(args: argparse.Namespace) -> None:
     rows = api_lookup(args.symbol, args.limit)
     if args.format == "json":
@@ -800,6 +834,14 @@ def command_preflight(args: argparse.Namespace) -> None:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Local evidence-aware retrieval over the ExteraGram plugin wiki")
     sp = p.add_subparsers(dest="cmd", required=True)
+
+    s = sp.add_parser('target-lookup',help='Target-aware ranking before presentation limits')
+    s.add_argument('query')
+    s.add_argument('--target-json',required=True)
+    s.add_argument('--mode',choices=['api','usage','recipe'],required=True)
+    s.add_argument('--limit',type=int,default=12)
+    s.add_argument('--format',choices=['json'],default='json')
+    s.set_defaults(func=command_target_lookup)
 
     s = sp.add_parser("context", help="Build a compact task-specific context packet")
     s.add_argument("query")
