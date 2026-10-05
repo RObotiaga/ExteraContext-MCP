@@ -463,7 +463,11 @@ def verify_feature(data):
     else:
         raise ValueError('Unknown feature')
     if jobs:
-        gates.update(packet_coverage=all(j['media_status']=='PACKET_COVERAGE_OBSERVED' for j in jobs),
+        attributed=all(j['generation']>0 for j in jobs)
+        gates.update(load_attribution=attributed,
+            artifact_identity=gates['artifact_identity'] and attributed,
+            installed_identity=gates['installed_identity'] and attributed,
+            packet_coverage=all(j['media_status']=='PACKET_COVERAGE_OBSERVED' for j in jobs),
             copy_preservation=all(j.get('copy_status')=='PASS' for j in jobs),queue_completion=all(j['queue_done'] for j in jobs),
             parts_coverage=all(j['parts_status']=='PASS' for j in jobs),parts_acknowledged=all(j.get('ack_status')=='PASS' for j in jobs))
     failed=any(j['media_status']=='FAIL' or j.get('copy_status')=='FAIL' or j.get('parts_status')=='FAIL' for j in jobs) or any(s['artifact_identity']=='FAIL' for s in result['sessions']) or any(observations.get(k) is False for k in required)

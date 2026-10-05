@@ -161,6 +161,19 @@ class DevelopmentToolsTests(unittest.TestCase):
         self.assertEqual([j['generation'] for j in result['analysis']['sessions'][0]['jobs']],[1,2])
         self.assertEqual(result['analysis']['sessions'][0]['jobs'][1]['media_status'],'PENDING')
 
+    def test_later_load_cannot_attest_an_earlier_job(self):
+        events=[json.loads(line) for line in trace(last=100_280_000).splitlines()]
+        loaded=events.pop(0)
+        expected={k:v for k,v in loaded.items() if k in {'version','dex_sha256','python_sha256','artifact_sha256','package','version_code','apk_sha256'}}
+        events.append(loaded)
+        log='\n'.join(json.dumps(dict(e,session='one',seq=i+1)) for i,e in enumerate(events))
+        result=dev.verify_feature({'feature':'long_round_camera','log':log,'expected_artifact':expected,
+                                 'observations':{k:True for k in ['motion_after_minute','speech_after_minute','continuous_part_boundary']}})
+        self.assertEqual(result['status'],'PENDING')
+        self.assertFalse(result['gates']['artifact_identity'])
+        self.assertFalse(result['gates']['installed_identity'])
+        self.assertFalse(result['gates']['load_attribution'])
+
     def test_small_negative_encoder_priming_is_not_recording_loss(self):
         events=[json.loads(line) for line in trace(last=100_280_000).splitlines()]
         for event in events:
