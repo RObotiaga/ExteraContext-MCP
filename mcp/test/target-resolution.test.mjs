@@ -7,13 +7,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PYTHON } from '../src/bridge.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
 test('target resolver binds versions to their labels and leaves ambiguity unknown', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'extera-target-'));
   const db = join(temporary, 'base.sqlite');
-  const prepared = spawnSync(process.env.EXTERACONTEXT_PYTHON || 'python3', ['-B', 'scripts/prepare_ci_fixture.py', db], { cwd: root, encoding: 'utf8' });
+  const prepared = spawnSync(PYTHON, ['-B', 'scripts/prepare_ci_fixture.py', db], { cwd: root, encoding: 'utf8' });
   assert.equal(prepared.status, 0, prepared.stderr);
   const client = new Client({ name: 'target-regression', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   try {

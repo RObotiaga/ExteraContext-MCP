@@ -3,6 +3,7 @@ import * as z from 'zod/v4';
 import { BridgeError, compactTarget, jsonArg, runPythonJson, targetLabel } from './bridge.mjs';
 import { VERSION } from './version.mjs';
 import { assessEvidence, developmentTools } from './development.mjs';
+import { targetValueRelation } from './target-values.mjs';
 
 // Keep JSON carried in a single Python argv bounded well below the bridge's
 // 256 KiB total-argument ceiling. Measure bytes, not JS UTF-16 code units.
@@ -251,10 +252,9 @@ function assertionPolarity(fact, symbol) {
   const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (!new RegExp(`(^|[^\\w.$])${escaped}(?![\\w.$])`, 'i').test(claim)) return null;
   // Absence of search results (or a negative-evidence topic) is NOT incompatibility.
-  const negative = /\b(?:not supported|unsupported|unavailable|removed|does not exist|incompatible)\b|\b(?:не поддерживается|недоступен|недоступна|удалён|удален|несовместим)\b/i.test(claim);
-  const positive = /\b(?:supported|supports|available|implemented|compatible|works)\b|\b(?:поддерживается|доступен|доступна|реализован|совместим)\b/i.test(
-    claim.replace(/\b(?:not supported|unsupported|unavailable|removed|does not exist|incompatible)\b|\b(?:не поддерживается|недоступен|недоступна|удалён|удален|несовместим)\b/ig, '')
-  );
+  const negativePattern = /(?<![\p{L}\p{N}_])(?:not\s+supported|unsupported|unavailable|removed|does\s+not\s+exist|incompatible|не\s+поддерживается|недоступен|недоступна|удалён|удален|несовместим)(?![\p{L}\p{N}_])/giu;
+  const negative = negativePattern.test(claim);
+  const positive = /(?<![\p{L}\p{N}_])(?:supported|supports|available|implemented|compatible|works|поддерживается|доступен|доступна|реализован|совместим)(?![\p{L}\p{N}_])/iu.test(claim.replace(negativePattern, ''));
   return negative === positive ? null : negative ? 'incompatible' : 'compatible';
 }
 
@@ -265,7 +265,7 @@ export function compatibilityFromFacts(facts, target, symbol) {
     (target.client_version || target.sdk_version) &&
     exactVersionField(f, 'client', target.client_version) &&
     exactVersionField(f, 'sdk', target.sdk_version) &&
-    ['package','version_code','apk_sha256','android_api','abi','variant'].every(k => target[k] === undefined || target[k] === null || f[k] === target[k])
+    ['package','version_code','apk_sha256','android_api','abi','variant'].every(k => ['not-requested','match'].includes(targetValueRelation(f[k],target[k])))
   );
   const assertions = relevant.map(f => ({ fact: f, verdict: assertionPolarity(f, symbol) })).filter(x => x.verdict);
   const verdicts = new Set(assertions.map(x => x.verdict));

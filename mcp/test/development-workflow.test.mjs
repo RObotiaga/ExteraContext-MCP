@@ -7,12 +7,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PYTHON } from '../src/bridge.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 test('exact build passport and target-aware lookup survive MCP wire validation', async () => {
   const temporary = mkdtempSync(join(tmpdir(), 'extera-development-'));
   const db = join(temporary, 'base.sqlite');
-  const prepared = spawnSync(process.env.EXTERACONTEXT_PYTHON || 'python3', ['-B', 'scripts/prepare_ci_fixture.py', db], { cwd: root, encoding: 'utf8' });
+  const prepared = spawnSync(PYTHON, ['-B', 'scripts/prepare_ci_fixture.py', db], { cwd: root, encoding: 'utf8' });
   assert.equal(prepared.status, 0, prepared.stderr);
   const client = new Client({ name: 'development-regression', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
   const target = {client:'AyuGram',platform:'Android',client_version:'12.9.0',package:'com.radolyn.ayugram',version_code:70079,android_api:36,apk_sha256:'8'.repeat(64),abi:'arm64-v8a'};
@@ -47,7 +48,7 @@ test('exact build passport and target-aware lookup survive MCP wire validation',
 test('APK request uses modern input_required elicitation and honours user decline',async()=>{
   const temporary=mkdtempSync(join(tmpdir(),'extera-apk-request-'));
   const db=join(temporary,'base.sqlite');
-  const prepared=spawnSync(process.env.EXTERACONTEXT_PYTHON || 'python3',['-B','scripts/prepare_ci_fixture.py',db],{cwd:root,encoding:'utf8'});
+  const prepared=spawnSync(PYTHON,['-B','scripts/prepare_ci_fixture.py',db],{cwd:root,encoding:'utf8'});
   assert.equal(prepared.status,0,prepared.stderr);
   const client=new Client({name:'apk-request-regression',version:'1'},{capabilities:{elicitation:{form:{}}},versionNegotiation:{mode:{pin:'2026-07-28'}}});
   let requests=0;

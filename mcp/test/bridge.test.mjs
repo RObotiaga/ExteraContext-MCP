@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runPython, runPythonJson, ROOT } from '../src/bridge.mjs';
+import { runPython, runPythonJson, ROOT, resolvePython } from '../src/bridge.mjs';
+
+test('Python executable follows platform default and explicit override',()=>{
+  assert.equal(resolvePython('win32',{}),'python');
+  assert.equal(resolvePython('linux',{}),'python3');
+  assert.equal(resolvePython('win32',{EXTERACONTEXT_PYTHON:'C:/tools/custom-python.exe'}),'C:/tools/custom-python.exe');
+});
 
 const db = process.env.EXTERACONTEXT_DB || join(ROOT, 'data', 'exteracontext.sqlite');
 let hasOfflineDb = true;

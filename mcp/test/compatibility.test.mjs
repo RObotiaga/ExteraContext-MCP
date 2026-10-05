@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { targetValueRelation } from '../src/target-values.mjs';
 
 // Exercise the production implementation without requiring optional MCP SDK packages.
 // The checkout can run this regression suite before dependencies are installed.
@@ -10,7 +11,7 @@ const start = source.indexOf('function exactVersionField(');
 const end = source.indexOf('\nasync function query(', start);
 assert.ok(start >= 0 && end > start, 'compatibility implementation must be present');
 const compatibilityFromFacts = runInNewContext(
-  `${source.slice(start, end).replace('export function compatibilityFromFacts', 'function compatibilityFromFacts')}\ncompatibilityFromFacts;`
+  `${source.slice(start, end).replace('export function compatibilityFromFacts', 'function compatibilityFromFacts')}\ncompatibilityFromFacts;`, { targetValueRelation }
 );
 
 const target = { client: 'ExteraGram', platform: 'Android', client_version: '12.5.1', sdk_version: '1.4.5.3' };
@@ -20,6 +21,20 @@ const fact = {
   status: 'docs', directness: 'official', source_id: 'exteragram-docs'
 };
 const check = (facts, t = target, symbol = 'send_request') => compatibilityFromFacts(facts, t, symbol).verdict;
+
+test('identity fields compare equivalent scalar representations and preserve unknown',()=>{
+  const t={...target,package:'com.example.client',version_code:70079,android_api:36,apk_sha256:'a'.repeat(64),abi:'arm64-v8a'};
+  const f={...fact,...t,version_code:'70079',android_api:'36',apk_sha256:'A'.repeat(64),abi:'ARM64-V8A'};
+  assert.equal(check([f],t),'compatible');
+  assert.equal(check([{...f,version_code:'70080'}],t),'unknown');
+  assert.equal(check([{...f,apk_sha256:undefined}],t),'unknown');
+});
+
+test('Russian availability assertions respect Unicode token boundaries',()=>{
+  for (const claim of ['send_request поддерживается.','send_request доступен!']) assert.equal(check([{...fact,claim}]),'compatible');
+  for (const claim of ['send_request не поддерживается.','send_request недоступен!']) assert.equal(check([{...fact,claim}]),'incompatible');
+  assert.equal(check([{...fact,claim:'send_request суперподдерживается'}]),'unknown');
+});
 
 test('requested APK identity cannot be inferred from a matching version; exact AyuGram evidence is eligible',()=>{
   const exact={...target,package:'com.exteragram.messenger',version_code:70079,apk_sha256:'a'.repeat(64)};

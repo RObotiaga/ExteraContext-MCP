@@ -4,7 +4,10 @@ import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '..', '..');
-export const PYTHON = process.env.EXTERACONTEXT_PYTHON || 'python3';
+export function resolvePython(platform = process.platform, env = process.env) {
+  return env.EXTERACONTEXT_PYTHON || (platform === 'win32' ? 'python' : 'python3');
+}
+export const PYTHON = resolvePython();
 const configuredTimeout = Number(process.env.EXTERACONTEXT_MCP_TIMEOUT_MS);
 const DEFAULT_TIMEOUT_MS = Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 45_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;

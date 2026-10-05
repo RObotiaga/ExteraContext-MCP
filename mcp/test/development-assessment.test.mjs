@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assessEvidence } from '../src/development.mjs';
 const target={client:'AyuGram',platform:'Android',client_version:'12.9.0',package:'com.radolyn.ayugram',version_code:70079,apk_sha256:'8'.repeat(64)};
+
+test('Russian and English token negation detects opposing claims without joining words',()=>{
+  for (const [yes,no] of [['API поддерживается','API не поддерживается'],['поддерживается API','не поддерживается API'],['API   поддерживается!','API НЕ  поддерживается.'],['API supported','API not supported']]) {
+    const facts=[yes,no].map((claim,i)=>({id:String(i),api:'API',claim}));
+    assert.equal(assessEvidence(facts).semantics_conflicts.length,1,JSON.stringify(facts));
+  }
+  assert.equal(assessEvidence([{api:'API',claim:'API некий supported'},{api:'API',claim:'API кий supported'}]).semantics_conflicts.length,0);
+});
 test('source assertions without exact build/hash remain references',()=>{
   const fact={client:'AyuGram',platform:'Android',version:'client 12.9.0',status:'code',claim:'API available'};
   const result=assessEvidence([fact],target);

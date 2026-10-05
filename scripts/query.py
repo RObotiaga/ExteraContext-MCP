@@ -642,6 +642,8 @@ def command_target_lookup(args: argparse.Namespace) -> None:
         matches=0
         mismatches=0
         for field,value in target.items():
+            if value is None or value=='':
+                continue
             if field in {'client_version','sdk_version'}:
                 relation=_version_relation(f,field.removesuffix('_version'),value)
             else:

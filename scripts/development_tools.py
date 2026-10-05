@@ -178,7 +178,7 @@ def inspect_client_apk(data):
     digest=sha(path)
     with zipfile.ZipFile(path) as archive:
         abis=sorted({n.split('/')[1] for n in archive.namelist() if n.startswith('lib/') and n.count('/')>=2})
-    summary=analyzer(['apk','summary',str(path)]).strip().split()
+    summary=analyzer(['apk','summary',str(path)]).strip().split(maxsplit=2)
     if len(summary)!=3:
         raise ValueError('Unexpected APK summary; refusing to infer identity')
     out={'path':str(path),'package':summary[0],'version_code':int(summary[1]),'client_version':summary[2],
@@ -229,6 +229,7 @@ def inspect_media_packets(data):
         raise ValueError('Cannot obtain bounded media stream identity')
     stream_data=json.loads(streams.stdout)['streams']
     timestamps={s['index']:[] for s in stream_data if s.get('codec_type') in {'video','audio'}}
+    missing_pts={index:0 for index in timestamps}
     with tempfile.TemporaryFile() as output:
         result=subprocess.run([executable,'-v','error','-show_packets','-show_entries','packet=stream_index,pts_time','-of','csv=p=0',str(path)],stdout=output,stderr=subprocess.DEVNULL,timeout=45,shell=False)
         if result.returncode or output.tell()>64*1024*1024:
@@ -239,6 +240,9 @@ def inspect_media_packets(data):
             if len(parts)<2 or not parts[0].isdigit(): continue
             index=int(parts[0])
             if index not in timestamps: continue
+            if parts[1]=='N/A':
+                missing_pts[index]+=1
+                continue
             try: pts=int(Decimal(parts[1])*1_000_000)
             except (InvalidOperation,ValueError,OverflowError):
                 raise ValueError('Media has packets without valid PTS') from None
@@ -247,7 +251,9 @@ def inspect_media_packets(data):
     for s in stream_data:
         if s['index'] not in timestamps: continue
         pts=sorted(timestamps[s['index']])
-        track={'mime':s['codec_type']+'/'+str(s.get('codec_name','unknown')),'samples':len(pts)}
+        missing=missing_pts[s['index']]
+        track={'mime':s['codec_type']+'/'+str(s.get('codec_name','unknown')),'samples':len(pts)+missing,
+               'timestampedSamples':len(pts),'missingPtsSamples':missing,'ptsComplete':missing==0}
         if pts:
             track.update(firstPtsUs=pts[0],maxPtsUs=pts[-1],maxGapUs=max((b-a for a,b in zip(pts,pts[1:])),default=0))
         tracks.append(track)
@@ -326,8 +332,21 @@ def probe_bridge_contract(data):
     if not isinstance(report,dict) or report.get('schema')!=1 or not isinstance(report.get('checks'),dict):
         raise ValueError('Invalid bridge probe report')
     checks=report['checks']
-    return {'status':'FAIL' if report.get('bootstrap_failure') or any(checks.get(k) is False for k in required) else 'EVIDENCE_CONSISTENT' if all(checks.get(k) is True for k in required) and report.get('sdk_runtime') else 'PENDING',
-        'missing_checks':[k for k in required if k not in checks], 'observed_checks':{k:checks.get(k) for k in required},
+    identity=report.get('sdk_identity')
+    sdk_known=(isinstance(identity,dict) and identity.get('module')=='_sdk_version'
+        and identity.get('runtime_loaded') is True
+        and identity.get('source') in {'sys.modules._sdk_version.'+k for k in ['__version__','version_str','version']}
+        and isinstance(identity.get('module_origin'),str) and 0<len(identity['module_origin'])<=4096
+        and isinstance(identity.get('version'),str)
+        and re.fullmatch(r'\d+(?:\.\d+){1,3}',identity['version']) is not None
+        and identity['version']==report.get('sdk_runtime'))
+    observed={k:checks.get(k) for k in required}
+    if not sdk_known and observed['actual_sdk_identity'] is True:
+        observed['actual_sdk_identity']=None
+    return {'status':'FAIL' if report.get('bootstrap_failure') or any(observed.get(k) is False for k in required) else 'EVIDENCE_CONSISTENT' if all(observed.get(k) is True for k in required) else 'PENDING',
+        'missing_checks':[k for k in required if observed.get(k) is not True], 'observed_checks':observed,
+        'sdk_runtime':identity['version'] if sdk_known and observed['actual_sdk_identity'] is True else None,
+        'sdk_identity':identity if sdk_known and observed['actual_sdk_identity'] is True else None,
         'parameter_methods':report.get('parameter_methods',{}),'runtime_verified':False,'boundary':BOUNDARY}
 
 def analyze_hook_impact(data):
@@ -413,10 +432,13 @@ def analyze_run(data):
                 if type(expected_us) is int and expected_us>0 and video and audio and all(type(t.get('samples')) is int and t['samples']>0 for t in [video,audio]):
                     # AAC encoder priming can put the first packet slightly before
                     # zero. Keep a bounded tolerance without accepting late starts.
-                    bad=any(type(t.get('firstPtsUs')) is not int or not -1_000_000<=t['firstPtsUs']<=1_000_000 or type(t.get('maxPtsUs')) is not int or not expected_us-1_000_000<=t['maxPtsUs']<=expected_us+1_000_000 or t['samples']<2 for t in [video,audio])
+                    bounds_known=all(type(t.get(k)) is int for t in [video,audio] for k in ['firstPtsUs','maxPtsUs'])
+                    bad=any((type(t.get('firstPtsUs')) is int and not -1_000_000<=t['firstPtsUs']<=1_000_000) or (type(t.get('maxPtsUs')) is int and not expected_us-1_000_000<=t['maxPtsUs']<=expected_us+1_000_000) for t in [video,audio])
                     gap_known=all(type(t.get('maxGapUs')) is int and 0<=t['maxGapUs']<=1_000_000 for t in [video,audio])
                     gap_bad=any(type(t.get('maxGapUs')) is int and t['maxGapUs']>1_000_000 for t in [video,audio])
-                    finding['media_status']='FAIL' if bad or gap_bad else 'PACKET_COVERAGE_OBSERVED' if gap_known else 'PENDING'
+                    pts_complete=all(type(t.get('missingPtsSamples',0)) is int and t.get('missingPtsSamples',0)==0 and t.get('ptsComplete',True) is True for t in [video,audio])
+                    finding['media_status']='FAIL' if bad or gap_bad else 'PACKET_COVERAGE_OBSERVED' if bounds_known and gap_known and pts_complete and all(t['samples']>=2 for t in [video,audio]) else 'PENDING'
+                    if not pts_complete: finding['findings'].append('Packets without PTS leave continuity unknown; measurable timestamps alone cannot establish complete coverage.')
                     if finding['media_status']=='FAIL': finding['findings'].append('Original camera packets do not cover expected recording; loss occurred before saved copy/split/send.')
                 if copy:
                     a,b=source.get('measurement',{}),copy.get('measurement',{})

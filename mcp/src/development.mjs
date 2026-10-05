@@ -1,4 +1,5 @@
 import { runPythonJson } from './bridge.mjs';
+import { targetValueRelation } from './target-values.mjs';
 import { inputRequired, acceptedContent, inputResponse, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 
 const dimensions=['client','platform','client_version','sdk_version','package','version_code','apk_sha256','android_api','abi','variant'];
@@ -12,10 +13,7 @@ function scopeValue(fact, key) {
   return actual;
 }
 function relation(fact, key, requested) {
-  if (requested === undefined || requested === null || requested === '') return 'not-requested';
-  const actual=scopeValue(fact,key);
-  if (actual === undefined || actual === null || actual === '') return 'unknown';
-  return String(actual).toLowerCase()===String(requested).toLowerCase()?'match':'mismatch';
+  return targetValueRelation(scopeValue(fact,key),requested);
 }
 function scopesOverlap(a,b) {
   return !dimensions.some(k=>relation(b,k,scopeValue(a,k))==='mismatch');
@@ -43,8 +41,9 @@ export function assessEvidence(facts, target={}, symbol='') {
     if (!scopesOverlap(a,b)) continue;
     const structured=a.assertion?.key && a.assertion.key===b.assertion?.key &&
       typeof a.assertion.value==='boolean' && typeof b.assertion.value==='boolean' && a.assertion.value!==b.assertion.value;
-    const normalize=c=>String(c || '').toLowerCase().replace(/\bnot\s+|\bне\s+/g,'').replace(/[.!?]/g,'').trim();
-    const neg=c=>/\bnot\b|(?:^|\s)не\s/.test(String(c || '').toLowerCase());
+    const negation=/(?<![\p{L}\p{N}_])(?:not|не)(?=\s)/u;
+    const normalize=c=>String(c || '').toLowerCase().replace(/(?<![\p{L}\p{N}_])(?:not|не)\s+/gu,'').replace(/[.!?]/g,'').replace(/\s+/g,' ').trim();
+    const neg=c=>negation.test(String(c || '').toLowerCase());
     const opposite=a.claim && b.claim && normalize(a.claim)===normalize(b.claim) && neg(a.claim)!==neg(b.claim);
     if (structured || opposite) semantics_conflicts.push({symbol:a.api,fact_ids:[a.id,b.id],reason:'Opposing assertions in overlapping target evidence.',check:'probe_bridge_contract'});
   }
@@ -98,5 +97,5 @@ export function developmentTools(server,{z,targetSchema,outputSchema,readAnnotat
   ];
   for (const [name,description,inputSchema] of tools) server.registerTool(name,{
     title:name,description,inputSchema,outputSchema,annotations:{...readAnnotations,readOnlyHint:name!=='download_client_apk',openWorldHint:['list_client_releases','list_public_apk_mirrors','download_client_apk'].includes(name),idempotentHint:!['list_client_releases','list_public_apk_mirrors','download_client_apk'].includes(name)}
-  }, async input=>guarded(name,async()=>toolResponse(name,await runPythonJson('scripts/development_tools.py',[name],{stdin:JSON.stringify(input),timeoutMs:180000}),[],protocolMeta)));
+  }, async input=>guarded(name,async()=>toolResponse(name,await runPythonJson('scripts/development_tools.py',[name],{stdin:JSON.stringify(input),timeoutMs:name==='download_client_apk'?240000:180000}),[],protocolMeta)));
 }

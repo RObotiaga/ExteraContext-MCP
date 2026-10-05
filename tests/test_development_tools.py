@@ -1,7 +1,11 @@
 from __future__ import annotations
 import base64
+import ast
 import hashlib
 import json
+import io
+import re
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 import tempfile
@@ -28,6 +32,92 @@ def trace(duration=100_298_000,last=59_988_288):
     return '\n'.join(json.dumps(dict(e,session='one',seq=i+1,version='0.1.19')) for i,e in enumerate(events))
 
 class DevelopmentToolsTests(unittest.TestCase):
+    def test_generated_probe_observes_loaded_sdk_and_keeps_unknown_pending(self):
+        prepared=dev.probe_bridge_contract({})
+        tree=ast.parse(prepared['probe_source'])
+        fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='observe_sdk_identity')
+        sdk=SimpleNamespace(__version__='1.4.5.0',version=(1,4,5,0),version_str='1.4.5.0',__file__='/runtime/_sdk_version.so')
+        namespace={'sys':SimpleNamespace(modules={'_sdk_version':sdk}),'re':re}
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),'owned-probe-helper','exec'),namespace)
+        observation=namespace['observe_sdk_identity']()
+        self.assertEqual(observation['version'],'1.4.5.0')
+        self.assertEqual(observation['source'],'sys.modules._sdk_version.__version__')
+        checks={name:True for name in prepared['required_checks']}
+        report={'schema':1,'checks':checks,'sdk_runtime':'1.4.5.0','sdk_identity':observation}
+        self.assertEqual(dev.probe_bridge_contract({'report':report})['status'],'EVIDENCE_CONSISTENT')
+        del namespace['sys'].modules['_sdk_version']
+        self.assertIsNone(namespace['observe_sdk_identity']())
+        for change in [{'sdk_identity':None},{'sdk_runtime':'different'},{'checks':dict(checks,actual_sdk_identity=None)}]:
+            result=dev.probe_bridge_contract({'report':dict(report,**change)})
+            self.assertEqual(result['status'],'PENDING')
+            self.assertIn('actual_sdk_identity',result['missing_checks'])
+        namespace['sys'].modules['_sdk_version']=SimpleNamespace(__version__='1.4.5.0',version_str='1.4.3.1',__file__='/runtime/_sdk_version.so')
+        with self.assertRaises(ValueError): namespace['observe_sdk_identity']()
+
+    def test_missing_pts_is_counted_and_cannot_establish_coverage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'video.mp4'
+            path.write_bytes(b'media fixture')
+            streams={'streams':[{'index':0,'codec_type':'video','codec_name':'h264'}, {'index':1,'codec_type':'audio','codec_name':'aac'}]}
+            def probe(args,**kwargs):
+                if '-show_streams' in args:
+                    return SimpleNamespace(returncode=0,stdout=json.dumps(streams).encode())
+                kwargs['stdout'].write(b'0,0\n0,N/A\n0,0.5\n1,0\n1,0.5\n')
+                return SimpleNamespace(returncode=0)
+            with patch.object(dev.shutil,'which',return_value='ffprobe'), patch.object(dev.subprocess,'run',side_effect=probe):
+                measured=dev.inspect_media_packets({'path':str(path)})['measurement']['tracks'][0]
+            self.assertEqual(measured['samples'],3)
+            self.assertEqual(measured['timestampedSamples'],2)
+            self.assertEqual(measured['missingPtsSamples'],1)
+            self.assertFalse(measured['ptsComplete'])
+        events=[json.loads(line) for line in trace(last=100_280_000).splitlines()]
+        for e in events:
+            if 'measurement' in e:
+                e['measurement']['tracks'][0].update(missingPtsSamples=1,ptsComplete=False)
+        log='\n'.join(json.dumps(e) for e in events)
+        self.assertEqual(dev.analyze_run({'log':log})['sessions'][0]['jobs'][0]['media_status'],'PENDING')
+        for e in events:
+            if 'measurement' in e:
+                track=e['measurement']['tracks'][0]
+                for key in ['firstPtsUs','maxPtsUs','maxGapUs']: track.pop(key,None)
+        self.assertEqual(dev.analyze_run({'log':'\n'.join(json.dumps(e) for e in events)})['sessions'][0]['jobs'][0]['media_status'],'PENDING')
+
+    def test_download_budget_allows_slow_valid_transfer_and_cleans_timeout(self):
+        data={'channel':'AyuGramReleases','repository':'AyuGram/AyuGram4A','asset_id':1}
+        payload=io.BytesIO()
+        with zipfile.ZipFile(payload,'w') as archive:
+            archive.writestr('AndroidManifest.xml',b'manifest')
+            archive.writestr('classes.dex',b'dex')
+        raw=payload.getvalue()
+        asset={'id':1,'size':len(raw),'name':'release.apk','browser_download_url':'https://github.com/AyuGram/AyuGram4A/releases/download/v1/release.apk'}
+        with tempfile.TemporaryDirectory() as tmp:
+            taskroot=Path(tmp)
+            fake_script=taskroot/'scripts'/'public_apks.py'
+            for times,success in [([0,90,100],True),([0,151],False)]:
+                with patch.object(public_apks,'__file__',str(fake_script)), patch.object(public_apks,'api',return_value=asset), patch.object(public_apks,'fetch',return_value=io.BytesIO(raw)), patch.object(public_apks.time,'monotonic',side_effect=times):
+                    if success:
+                        result=public_apks.download_client_apk(data)
+                        path=Path(result['path'])
+                        self.assertEqual(result['apk_sha256'],hashlib.sha256(raw).hexdigest())
+                        path.unlink()
+                    else:
+                        with self.assertRaisesRegex(ValueError,'timed out'):
+                            public_apks.download_client_apk(data)
+                        self.assertEqual(list((taskroot/'.cache/public-apks').iterdir()),[])
+
+    def test_apk_summary_preserves_version_name_with_spaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'client.apk'
+            with zipfile.ZipFile(path,'w') as archive:
+                archive.writestr('lib/arm64-v8a/libtest.so',b'test')
+            with patch.object(dev,'analyzer',return_value='com.example.client 70079 10.0.1 Beta\n'):
+                result=dev.inspect_client_apk({'path':str(path)})
+            self.assertEqual(result['client_version'],'10.0.1 Beta')
+            self.assertEqual(result['version_code'],70079)
+            for bad in ['com.example.client 70079','com.example.client invalid 10.0.1 Beta']:
+                with patch.object(dev,'analyzer',return_value=bad), self.assertRaises(ValueError):
+                    dev.inspect_client_apk({'path':str(path)})
+
     def test_channel_metadata_does_not_claim_download_or_verified_build(self):
         html='''<div class="tgme_widget_message" data-post="exteraReleases/158"><a class="tgme_widget_message_document_wrap" href="https://t.me/exteraReleases/158?single"><div class="tgme_widget_message_document_title">exteraGram-full-universal-20261004.apk</div><div class="tgme_widget_message_document_extra">111.4 MB</div></a><time datetime="2026-10-04T18:07:34Z"></time></div>'''
         found=dev.parse_releases(html,'exteraReleases')

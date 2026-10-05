@@ -105,6 +105,15 @@ class TargetRetrievalTests(unittest.TestCase):
         self.assertIn('opposite',[f['id'] for f in packet['assessment_facts']])
         self.assertEqual(search.call_args.args[1],501)
 
+    def test_unspecified_target_fields_do_not_demote_detailed_evidence(self):
+        target={'client':'AyuGram','package':None,'abi':''}
+        detailed={'id':'detailed','client':'AyuGram','package':'com.radolyn.ayugram','abi':'arm64-v8a','score':2}
+        reference={'id':'reference','client':'AyuGram','score':1}
+        output=io.StringIO()
+        with patch.object(query,'search_facts',return_value=[reference,detailed]), contextlib.redirect_stdout(output):
+            query.command_target_lookup(argparse.Namespace(query='API',target_json=json.dumps(target),mode='facts',limit=1))
+        self.assertEqual(json.loads(output.getvalue())['items'][0]['id'],'detailed')
+
 
 if __name__ == "__main__":
     unittest.main()

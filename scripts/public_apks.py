@@ -22,6 +22,7 @@ PROVENANCE = {
     'AyuGramReleases': 'https://github.com/AyuGram',
 }
 MAX_APK = 1024 * 1024 * 1024
+DOWNLOAD_SECONDS = 150
 
 class PublicRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -98,7 +99,7 @@ def download_client_apk(data):
         raise ValueError('Invalid expected APK hash')
     cache=Path(__file__).resolve().parents[1]/'.cache/public-apks'
     cache.mkdir(parents=True,exist_ok=True)
-    deadline=time.monotonic()+80
+    deadline=time.monotonic()+DOWNLOAD_SECONDS
     digest=hashlib.sha256()
     count=0
     # Owned temporary file only; failures cannot overwrite a prior download.
@@ -108,7 +109,9 @@ def download_client_apk(data):
             with fetch(record['download_url']) as response:
                 while True:
                     if time.monotonic()>deadline: raise ValueError('APK acquisition timed out')
-                    block=response.read(1024*1024)
+                    # One buffered/socket read per iteration allows the deadline to
+                    # be checked even when a server slowly drips a large chunk.
+                    block=response.read1(1024*1024)
                     if not block: break
                     count+=len(block)
                     if count>record['bytes'] or count>MAX_APK: raise ValueError('APK exceeds publisher size')
