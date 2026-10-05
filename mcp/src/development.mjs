@@ -2,16 +2,23 @@ import { runPythonJson } from './bridge.mjs';
 import { inputRequired, acceptedContent, inputResponse, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
 
 const dimensions=['client','platform','client_version','sdk_version','package','version_code','apk_sha256','android_api','abi','variant'];
-function relation(fact, key, requested) {
-  if (requested === undefined || requested === null || requested === '') return 'not-requested';
+function scopeValue(fact, key) {
   let actual=fact[key];
   if (!actual && ['client_version','sdk_version'].includes(key)) {
     const label=key==='client_version'?'(?:client|app)':'(?:sdk|elyx)';
     const matches=[...String(fact.version || '').matchAll(new RegExp(`(?:^|[;,]\\s*)${label}\\s+(\\d+(?:\\.\\d+)+)(?=\\s*(?:[;,]|$))`,'ig'))];
     if (matches.length===1) actual=matches[0][1];
   }
-  if (!actual) return 'unknown';
+  return actual;
+}
+function relation(fact, key, requested) {
+  if (requested === undefined || requested === null || requested === '') return 'not-requested';
+  const actual=scopeValue(fact,key);
+  if (actual === undefined || actual === null || actual === '') return 'unknown';
   return String(actual).toLowerCase()===String(requested).toLowerCase()?'match':'mismatch';
+}
+function scopesOverlap(a,b) {
+  return !dimensions.some(k=>relation(b,k,scopeValue(a,k))==='mismatch');
 }
 
 export function assessEvidence(facts, target={}, symbol='') {
@@ -33,14 +40,7 @@ export function assessEvidence(facts, target={}, symbol='') {
   for (let i=0;i<relevant.length;i++) for (let j=i+1;j<relevant.length;j++) {
     const a=relevant[i],b=relevant[j];
     if (!a.api || a.api!==b.api) continue;
-    if (dimensions.some(k=> {
-      const scoped=a[k] ?? (['client_version','sdk_version'].includes(k) ? undefined : null);
-      return scoped != null && relation(b,k,scoped)==='mismatch';
-    }) || ['client_version','sdk_version'].some(k=> {
-      const label=k==='client_version'?'(?:client|app)':'(?:sdk|elyx)';
-      const scoped=[...String(a.version || '').matchAll(new RegExp(`(?:^|[;,]\\s*)${label}\\s+(\\d+(?:\\.\\d+)+)(?=\\s*(?:[;,]|$))`,'ig'))];
-      return !a[k] && scoped.length===1 && relation(b,k,scoped[0][1])==='mismatch';
-    })) continue;
+    if (!scopesOverlap(a,b)) continue;
     const structured=a.assertion?.key && a.assertion.key===b.assertion?.key &&
       typeof a.assertion.value==='boolean' && typeof b.assertion.value==='boolean' && a.assertion.value!==b.assertion.value;
     const normalize=c=>String(c || '').toLowerCase().replace(/\bnot\s+|\bне\s+/g,'').replace(/[.!?]/g,'').trim();
@@ -48,9 +48,9 @@ export function assessEvidence(facts, target={}, symbol='') {
     const opposite=a.claim && b.claim && normalize(a.claim)===normalize(b.claim) && neg(a.claim)!==neg(b.claim);
     if (structured || opposite) semantics_conflicts.push({symbol:a.api,fact_ids:[a.id,b.id],reason:'Opposing assertions in overlapping target evidence.',check:'probe_bridge_contract'});
   }
-  const claims=(Array.isArray(facts)?facts:[]).map(f=>String(f.claim || f.statement || ''));
-  if (/find_class/i.test(symbol) && claims.some(c=>/Java Class|getDeclaredMethod|getDeclaredField/i.test(c)) &&
-      claims.some(c=>/wrapper|обёрт|оберт|не предоставлял|несоответств/i.test(c))) {
+  const claim=f=>String(f.claim || f.statement || '');
+  if (/find_class/i.test(symbol) && relevant.some(a=>/Java Class|getDeclaredMethod|getDeclaredField/i.test(claim(a)) &&
+      relevant.some(b=>a!==b && scopesOverlap(a,b) && /wrapper|обёрт|оберт|не предоставлял|несоответств/i.test(claim(b))))) {
     semantics_conflicts.push({symbol:'find_class',reason:'Class metadata and Python Java wrapper behavior differ across reported environments.',check:'probe_bridge_contract'});
   }
   const next_checks=[];

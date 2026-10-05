@@ -21,6 +21,10 @@ test('exact build passport and target-aware lookup survive MCP wire validation',
     const resolved = await client.callTool({name:'resolve_target',arguments:{target}});
     assert.notEqual(resolved.isError,true,JSON.stringify(resolved));
     assert.equal(resolved.structuredContent.data.target.apk_sha256,target.apk_sha256);
+    const packet=await client.callTool({name:'search_knowledge',arguments:{query:'reflection',target,limit:1}});
+    assert.notEqual(packet.isError,true,JSON.stringify(packet));
+    assert.ok(Array.isArray(packet.structuredContent.data.retrieval.assessment_facts));
+    assert.ok(Array.isArray(packet.structuredContent.data.context.facts));
     for (const [name,args] of [['find_api',{symbol:'find_class'}],['find_usage',{query:'reflection'}],['get_recipe',{query:'hooks'}]]) {
       const result=await client.callTool({name,arguments:{...args,target}});
       assert.notEqual(result.isError,true,JSON.stringify(result));

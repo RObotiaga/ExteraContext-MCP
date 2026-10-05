@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+import argparse
+import contextlib
+import io
+import json
 import sys
 import tempfile
 import unittest
@@ -87,6 +91,19 @@ class TargetRetrievalTests(unittest.TestCase):
         p = self.packet("queue account", "1.0", "0.0.1")
         self.assertEqual(p["facts"][0]["target_version_match"], {"client": "unknown", "sdk": "unknown"})
         self.assertTrue(any("unknown" in w for w in p["warnings"]))
+
+    def test_full_target_precedes_context_limit_and_keeps_opposing_claim(self):
+        target={'client':'AyuGram','package':'com.radolyn.ayugram','version_code':70079,'apk_sha256':'8'*64}
+        donors=[{'id':str(i),'score':100-i,'package':'other.client','status':'code'} for i in range(40)]
+        exact={'id':'exact',**target,'score':1,'api':'testApi','claim':'testApi is supported','status':'code'}
+        opposite=dict(exact,id='opposite',claim='testApi is not supported')
+        output=io.StringIO()
+        with patch.object(query,'search_facts',return_value=donors+[exact,opposite]) as search, contextlib.redirect_stdout(output):
+            query.command_target_lookup(argparse.Namespace(query='testApi',target_json=json.dumps(target),mode='context',limit=1))
+        packet=json.loads(output.getvalue())
+        self.assertEqual(packet['context']['facts'][0]['id'],'exact')
+        self.assertIn('opposite',[f['id'] for f in packet['assessment_facts']])
+        self.assertEqual(search.call_args.args[1],501)
 
 
 if __name__ == "__main__":

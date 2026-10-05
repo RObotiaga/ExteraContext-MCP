@@ -128,6 +128,39 @@ class DevelopmentToolsTests(unittest.TestCase):
         self.assertFalse(inspected['target_identity_verified'])
         self.assertIn('variant',inspected['unbound_fields'])
 
+    def test_apk_request_rejects_wrong_client_and_keeps_unknown_client_unbound(self):
+        actual={'package':'com.exteragram.messenger','version_code':1,'apk_sha256':'8'*64}
+        with patch.object(dev,'inspect_client_apk',return_value=actual):
+            wrong=dev.request_client_apk({'target':dict(actual,client='AyuGram'),'path':'client.apk'})
+            unknown=dev.request_client_apk({'target':dict(actual,client='OtherClient'),'path':'client.apk'})
+        self.assertEqual(wrong['status'],'APK_MISMATCH')
+        self.assertFalse(wrong['target_identity_verified'])
+        self.assertFalse(unknown['target_identity_verified'])
+        self.assertIn('client',unknown['unbound_fields'])
+
+    def test_later_contradictory_audit_prevents_feature_acceptance(self):
+        log=trace(last=100_280_000)
+        expected=json.loads(log.splitlines()[0])
+        expected={k:v for k,v in expected.items() if k in {'version','dex_sha256','python_sha256','artifact_sha256','package','version_code','apk_sha256'}}
+        args={'feature':'long_round_camera','expected_artifact':expected,'observations':{k:True for k in ['motion_after_minute','speech_after_minute','continuous_part_boundary']}}
+        self.assertEqual(dev.verify_feature(dict(args,log=log))['status'],'EVIDENCE_CONSISTENT')
+        for phase in ['camera_file','saved_copy']:
+            later=json.loads(trace().splitlines()[2])
+            later.update(seq=10,phase=phase)
+            self.assertEqual(dev.verify_feature(dict(args,log=log+'\n'+json.dumps(later)))['status'],'FAIL')
+
+    def test_job_identifier_is_not_reused_across_load_generations(self):
+        events=[json.loads(line) for line in trace(last=100_280_000).splitlines()]
+        expected={k:v for k,v in events[0].items() if k in {'version','dex_sha256','python_sha256','artifact_sha256','package','version_code','apk_sha256'}}
+        events.extend([dict(expected,event='plugin.load.start'),{'event':'queue.created','job':'job','source':'imported'},
+                       {'event':'send.ack','job':'job','acknowledged_part':1},{'event':'queue.done','job':'job','total':2}])
+        log='\n'.join(json.dumps(dict(e,session='one',seq=i+1,version='0.1.19')) for i,e in enumerate(events))
+        result=dev.verify_feature({'feature':'long_round_camera','log':log,'expected_artifact':expected,
+                                 'observations':{k:True for k in ['motion_after_minute','speech_after_minute','continuous_part_boundary']}})
+        self.assertEqual(result['status'],'PENDING')
+        self.assertEqual([j['generation'] for j in result['analysis']['sessions'][0]['jobs']],[1,2])
+        self.assertEqual(result['analysis']['sessions'][0]['jobs'][1]['media_status'],'PENDING')
+
     def test_small_negative_encoder_priming_is_not_recording_loss(self):
         events=[json.loads(line) for line in trace(last=100_280_000).splitlines()]
         for event in events:

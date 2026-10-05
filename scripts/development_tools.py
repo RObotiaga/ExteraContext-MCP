@@ -204,6 +204,11 @@ def request_client_apk(data):
         checked={k:actual.get(k)==target[k] for k in ['client_version','package','version_code','apk_sha256'] if target.get(k) is not None}
         if target.get('abi') and target['abi']!='universal': checked['abi']=target['abi'] in actual['supported_abis']
         missing=[k for k in ['package','version_code','apk_sha256'] if target.get(k) is None]
+        client_packages={'ayugram':{'com.radolyn.ayugram'},'exteragram':{'com.exteragram.messenger'}}
+        if target.get('client'):
+            packages=client_packages.get(target['client'].lower())
+            if packages: checked['client']=actual.get('package') in packages
+            else: missing.append('client')
         # Build variants are not established by filenames or manifest versions.
         if target.get('variant') is not None: missing.append('variant')
         result.update(status='APK_MISMATCH' if any(v is False for v in checked.values()) else 'APK_INSPECTED',actual=actual,matching_fields=checked,
@@ -388,11 +393,18 @@ def analyze_run(data):
                 identity='PASS'
         installed_identity=identity if all(expected.get(k) is not None for k in ['artifact_sha256','python_sha256','package','version_code','apk_sha256']) else 'PENDING'
         jobs=[]
-        for job in sorted({e['job'] for e in events if isinstance(e.get('job'),str)}):
-            trace=[e for e in events if e.get('job')==job]
-            source=next((e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase') in {'camera_file','source_file'}),None)
-            copy=next((e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase')=='saved_copy'),None)
-            finding={'job':job,'source_kind':next((e.get('source') for e in trace if e.get('event')=='queue.created'),None),'queue_done':any(e.get('event')=='queue.done' for e in trace),'media_status':'PENDING','findings':[]}
+        job_events={}
+        generation=0
+        for event in events:
+            if event.get('event')=='plugin.load.start': generation+=1
+            if isinstance(event.get('job'),str):
+                job_events.setdefault((generation,event['job']),[]).append(event)
+        for (generation,job),trace in sorted(job_events.items()):
+            sources=[e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase') in {'camera_file','source_file'}]
+            copies=[e for e in trace if e.get('event') in {'camera.source.audit','media.source.audit'} and e.get('phase')=='saved_copy']
+            source=sources[0] if sources else None
+            copy=copies[0] if copies else None
+            finding={'job':job,'generation':generation,'source_kind':next((e.get('source') for e in trace if e.get('event')=='queue.created'),None),'queue_done':any(e.get('event')=='queue.done' for e in trace),'media_status':'PENDING','findings':[]}
             if source:
                 tracks=source.get('measurement',{}).get('tracks',[])
                 video=next((t for t in tracks if str(t.get('mime','')).startswith('video/')),None)
@@ -409,6 +421,12 @@ def analyze_run(data):
                 if copy:
                     a,b=source.get('measurement',{}),copy.get('measurement',{})
                     finding['copy_status']='PASS' if type(a.get('bytesAfter')) is int and a['bytesAfter']>0 and a.get('tracks')==b.get('tracks') and a.get('bytesAfter')==b.get('bytesAfter') and a.get('bytesBefore')==a.get('bytesAfter') and b.get('bytesBefore')==b.get('bytesAfter') else 'FAIL'
+            if any(e.get('measurement')!=source.get('measurement') or e.get('expected_us')!=source.get('expected_us') for e in sources[1:]):
+                finding['media_status']='FAIL'
+                finding['findings'].append('Unresolved contradictory source audits for the same job.')
+            if any(e.get('measurement')!=copy.get('measurement') or e.get('expected_us')!=copy.get('expected_us') for e in copies[1:]):
+                finding['copy_status']='FAIL'
+                finding['findings'].append('Unresolved contradictory saved-copy audits for the same job.')
             part_events=[e for e in trace if e.get('event')=='split.part']
             parts={e.get('part'):e.get('duration_us') for e in part_events if type(e.get('part')) is int and type(e.get('duration_us')) is int}
             acknowledged={e.get('acknowledged_part') for e in trace if e.get('event')=='send.ack' and type(e.get('acknowledged_part')) is int}

@@ -31,3 +31,10 @@ test('opposite assertions for disjoint versions are not contradictions',()=>{
   assert.equal(assessEvidence(facts,{client:'AyuGram'},'testApi').semantics_conflicts.length,0);
   assert.equal(assessEvidence(facts.map(f=>({...f,version:'client 12.9.0'})),{client:'AyuGram'},'testApi').semantics_conflicts.length,1);
 });
+
+test('Class/wrapper evidence for disjoint targets is not a find_class conflict',()=>{
+  const facts=[{...target,claim:'find_class returns Java Class'},
+    {...target,client_version:'12.8.0',claim:'find_class returns Python wrapper'}];
+  assert.equal(assessEvidence(facts,target,'find_class').semantics_conflicts.length,0);
+  assert.equal(assessEvidence(facts,{client:'AyuGram'},'find_class').semantics_conflicts.length,0);
+});

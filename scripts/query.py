@@ -514,8 +514,15 @@ def _target_facts(q: str, target: str, client_version: str | None,
     return pool[:limit], False
 
 
-def context_packet(q: str, target: str, client_version: str | None, sdk_version: str | None, limit: int) -> dict[str, Any]:
-    facts, explicit_donor = _target_facts(q, target, client_version, sdk_version, limit)
+def context_packet(q: str, target: str, client_version: str | None, sdk_version: str | None, limit: int,
+                   facts_override: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    if facts_override is None:
+        facts, explicit_donor = _target_facts(q, target, client_version, sdk_version, limit)
+    else:
+        facts=facts_override
+        explicit_donor=_explicit_donor_lookup(q,facts)
+        for fact in facts:
+            fact['target_version_match']={'client':_version_relation(fact,'client',client_version),'sdk':_version_relation(fact,'sdk',sdk_version)}
     recipes = search_docs(q, limit=4, kind="recipe")
     topics = search_docs(q, limit=4, kind="topic")
     api_candidates = []
@@ -645,8 +652,11 @@ def command_target_lookup(args: argparse.Namespace) -> None:
         return (mismatches==0,matches,f.get('score',0))
     pool.sort(key=rank,reverse=True)
     selected=pool[:args.limit]
-    print(json.dumps({'items':selected,'assessment_facts':pool[:cap],'candidate_count':len(pool),
-        'candidate_limit_hit':len(pool)>cap,'coverage':'bounded retrieval; not complete corpus coverage'},ensure_ascii=False))
+    result={'items':selected,'assessment_facts':pool[:cap],'candidate_count':len(pool),
+        'candidate_limit_hit':len(pool)>cap,'coverage':'bounded retrieval; not complete corpus coverage'}
+    if args.mode=='context':
+        result['context']=context_packet(args.query,' '.join(str(target.get(k,'')) for k in ['client','platform']),target.get('client_version'),target.get('sdk_version'),args.limit,selected)
+    print(json.dumps(result,ensure_ascii=False))
 
 
 def command_api(args: argparse.Namespace) -> None:
@@ -838,7 +848,7 @@ def parser() -> argparse.ArgumentParser:
     s = sp.add_parser('target-lookup',help='Target-aware ranking before presentation limits')
     s.add_argument('query')
     s.add_argument('--target-json',required=True)
-    s.add_argument('--mode',choices=['api','usage','recipe'],required=True)
+    s.add_argument('--mode',choices=['api','usage','recipe','context'],required=True)
     s.add_argument('--limit',type=int,default=12)
     s.add_argument('--format',choices=['json'],default='json')
     s.set_defaults(func=command_target_lookup)

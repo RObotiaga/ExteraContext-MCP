@@ -337,6 +337,10 @@ export function buildServer({ era = 'unknown', legacyAllowed = true } = {}) {
     annotations: READ_ANNOTATIONS
   }, async input => guarded('search_knowledge', async () => {
     const resolved = normalizeTarget(input);
+    if (input.target || input.target_text) {
+      const retrieved=await query('target-lookup',input.query,{limit:input.limit,targetJson:resolved.target,mode:'context'});
+      return toolResponse('search_knowledge',{resolved_target:resolved,context:retrieved.context,retrieval:retrieved,assessment:assessEvidence(retrieved.assessment_facts,resolved.target,input.query)},retrieved.context.warnings,protocolMeta);
+    }
     const data = await query('context', input.query, {
       target: targetLabel(resolved.target),
       clientVersion: resolved.target.client_version,
