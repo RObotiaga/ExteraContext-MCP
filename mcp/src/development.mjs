@@ -49,8 +49,9 @@ export function assessEvidence(facts, target={}, symbol='') {
     if (structured || opposite) semantics_conflicts.push({symbol:a.api,fact_ids:[a.id,b.id],reason:'Opposing assertions in overlapping target evidence.',check:'probe_bridge_contract'});
   }
   const claim=f=>String(f.claim || f.statement || '');
-  if (/find_class/i.test(symbol) && relevant.some(a=>/Java Class|getDeclaredMethod|getDeclaredField/i.test(claim(a)) &&
-      relevant.some(b=>a!==b && scopesOverlap(a,b) && /wrapper|обёрт|оберт|не предоставлял|несоответств/i.test(claim(b))))) {
+  const lacksReflection=f=>/without reflection|without (?:getDeclaredMethod|getDeclaredField)|(?:getDeclaredMethod|getDeclaredField).*unavailable|(?:lacks|missing) reflection|не предоставлял.*(?:getDeclared|рефлекс)/i.test(claim(f));
+  if (/find_class/i.test(symbol) && relevant.some(a=>!lacksReflection(a) && /Java Class|getDeclaredMethod|getDeclaredField/i.test(claim(a)) &&
+      relevant.some(b=>a!==b && scopesOverlap(a,b) && lacksReflection(b)))) {
     semantics_conflicts.push({symbol:'find_class',reason:'Class metadata and Python Java wrapper behavior differ across reported environments.',check:'probe_bridge_contract'});
   }
   const next_checks=[];

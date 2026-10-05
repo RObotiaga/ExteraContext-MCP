@@ -38,3 +38,9 @@ test('Class/wrapper evidence for disjoint targets is not a find_class conflict',
   assert.equal(assessEvidence(facts,target,'find_class').semantics_conflicts.length,0);
   assert.equal(assessEvidence(facts,{client:'AyuGram'},'find_class').semantics_conflicts.length,0);
 });
+
+test('corroborating Java Class wrapper records are not a conflict',()=>{
+  const facts=['first','second'].map(id=>({id,...target,status:'code',claim:'find_class returns a Java Class wrapper with getDeclaredMethod available'}));
+  assert.equal(assessEvidence(facts,target,'find_class').compatibility,'exact-target-evidence');
+  assert.equal(assessEvidence(facts,target,'find_class').semantics_conflicts.length,0);
+});
