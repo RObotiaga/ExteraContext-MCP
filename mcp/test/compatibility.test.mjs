@@ -36,6 +36,13 @@ test('Russian availability assertions respect Unicode token boundaries',()=>{
   assert.equal(check([{...fact,claim:'send_request суперподдерживается'}]),'unknown');
 });
 
+test('separate negation before availability words cannot imply compatibility',()=>{
+  for (const suffix of ['не доступен','не доступна','не реализован','не совместим','not available','not implemented','not compatible']) {
+    assert.equal(check([{...fact,claim:`send_request ${suffix}.`}]),'incompatible',suffix);
+  }
+  assert.equal(check([{...fact,claim:'send_request доступен, но не совместим.'}]),'unknown');
+});
+
 test('requested APK identity cannot be inferred from a matching version; exact AyuGram evidence is eligible',()=>{
   const exact={...target,package:'com.exteragram.messenger',version_code:70079,apk_sha256:'a'.repeat(64)};
   assert.equal(check([fact],exact),'unknown');

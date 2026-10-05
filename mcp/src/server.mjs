@@ -252,7 +252,7 @@ function assertionPolarity(fact, symbol) {
   const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (!new RegExp(`(^|[^\\w.$])${escaped}(?![\\w.$])`, 'i').test(claim)) return null;
   // Absence of search results (or a negative-evidence topic) is NOT incompatibility.
-  const negativePattern = /(?<![\p{L}\p{N}_])(?:not\s+supported|unsupported|unavailable|removed|does\s+not\s+exist|incompatible|не\s+поддерживается|недоступен|недоступна|удалён|удален|несовместим)(?![\p{L}\p{N}_])/giu;
+  const negativePattern = /(?<![\p{L}\p{N}_])(?:not\s+(?:supported|supports|available|implemented|compatible|works)|unsupported|unavailable|removed|does\s+not\s+exist|incompatible|не\s+(?:поддерживается|доступен|доступна|реализован|совместим)|недоступен|недоступна|удалён|удален|несовместим)(?![\p{L}\p{N}_])/giu;
   const negative = negativePattern.test(claim);
   const positive = /(?<![\p{L}\p{N}_])(?:supported|supports|available|implemented|compatible|works|поддерживается|доступен|доступна|реализован|совместим)(?![\p{L}\p{N}_])/iu.test(claim.replace(negativePattern, ''));
   return negative === positive ? null : negative ? 'incompatible' : 'compatible';
