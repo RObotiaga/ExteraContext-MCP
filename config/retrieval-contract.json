@@ -35,9 +35,7 @@
     "plugins-store-gitverse",
     "vestr-plugins"
   ],
-  "target_ecosystem_prefixes": [
-    "plugins-store-"
-  ],
+  "target_ecosystem_prefixes": [],
   "donor_prefixes": [
     "ayugram",
     "nagram",
