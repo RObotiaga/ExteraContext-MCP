@@ -60,6 +60,8 @@ build / deploy / validate again
 8. **Development state is persisted outside the project repository.** One task/ticket maps to a `DevelopmentRun`; each source/artifact revision maps to a child `Iteration`.
 9. **Development state and reusable knowledge are separate stores.** `development.sqlite` owns transient/reproducibility state for runs, builds, deployments and tests; `knowledge.sqlite` remains the durable verified knowledge overlay.
 10. **Project repositories remain declarative.** They may contain build/test/acceptance manifests, but not device-local transient state, logs, or current-run bookkeeping.
+11. **The normal MCP path is a high-level development state machine.** The external agent should not have to manually remember build → preflight → deploy → deployed-identity verification → acceptance → evidence ordering.
+12. **Atomic primitives remain available for diagnosis and exceptional control.** They must not bypass run/iteration identity, evidence binding, authorization, or safety checks.
 
 ## Development state model
 
@@ -99,6 +101,56 @@ data/development.sqlite    → DevelopmentRun / Iteration / build / deploy / tes
 project repository         → declarative manifests only
 ```
 
+## MCP interaction model
+
+The MCP surface has two levels.
+
+### High-level safe path
+
+The default workflow exposed to a coding agent is stateful and ordered:
+
+```text
+prepare_task_context
+→ start_development_run
+→ submit_source_revision
+→ execute_iteration
+```
+
+`execute_iteration` owns the standard sequence:
+
+```text
+source identity
+→ build
+→ artifact identity
+→ artifact preflight
+→ deploy / reload
+→ deployed identity preflight
+→ acceptance tests
+→ evidence collection
+→ PASS / FAIL / BLOCKED / INFRA_ERROR
+```
+
+A failed iteration returns structured `repair_context` rather than modifying source code itself. The external agent applies the source change and submits a new source revision, which creates the next iteration.
+
+### Atomic diagnostic primitives
+
+The same system also exposes narrower operations for investigation and unusual cases, for example:
+
+```text
+inspect_build
+inspect_artifact
+verify_artifact
+inspect_device
+inspect_runtime
+collect_logs
+collect_evidence
+rerun_test
+query_knowledge
+inspect_with_rea
+```
+
+Atomic operations are subordinate to the same `DevelopmentRun` / `Iteration` identity and evidence rules. They are not an escape hatch for attaching stale artifacts, unbound runtime results, or caller-asserted PASS states.
+
 ## Current implementation baseline
 
 The existing MCP is primarily a knowledge/evidence plane: retrieval, provenance, compatibility queries, staged write-back, knowledge orchestration, and diagnostics. `record_runtime_result` is intentionally fail-closed without trusted machine attestation.
@@ -109,7 +161,6 @@ The closed-loop design will extend this baseline with project/task context, buil
 
 Decisions below are intentionally unresolved until they are grilled and accepted:
 
-- Whether build/deploy/test operations are exposed as atomic tools, a high-level state machine, or both.
 - How projects define their build, artifact, deploy, and acceptance adapters without granting arbitrary shell authority.
 - Which failures automatically route to Knowledge, REA, device runtime, or back to the coding agent.
 - How ticket acceptance requirements become executable test plans.
