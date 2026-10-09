@@ -57,6 +57,47 @@ build / deploy / validate again
 5. **Successful implementations become reusable knowledge.** Runtime- or acceptance-confirmed discoveries should enter the existing guarded collector/verifier knowledge pipeline rather than being trusted solely because the implementing agent reports success.
 6. **Evidence status remains explicit.** `code`, `docs`, `static-apk`, runtime observation, behavior verification, and ticket acceptance must not collapse into one generic "verified" state.
 7. **The current trusted knowledge/write-back model is preserved.** The closed loop extends the MCP; it does not weaken independent verification or machine-attestation requirements.
+8. **Development state is persisted outside the project repository.** One task/ticket maps to a `DevelopmentRun`; each source/artifact revision maps to a child `Iteration`.
+9. **Development state and reusable knowledge are separate stores.** `development.sqlite` owns transient/reproducibility state for runs, builds, deployments and tests; `knowledge.sqlite` remains the durable verified knowledge overlay.
+10. **Project repositories remain declarative.** They may contain build/test/acceptance manifests, but not device-local transient state, logs, or current-run bookkeeping.
+
+## Development state model
+
+```text
+DevelopmentRun
+├── run_id
+├── project identity
+├── task / issue identity
+├── base source identity
+├── target client / SDK / platform
+├── acceptance requirements
+├── status
+│
+├── Iteration 1
+│   ├── source identity
+│   ├── build invocation + result
+│   ├── artifact identities + hashes
+│   ├── deployment identity
+│   ├── tests + assertions
+│   ├── evidence
+│   └── diagnosis / repair context
+│
+├── Iteration 2
+│   └── ...
+│
+└── resulting knowledge candidates
+```
+
+`DevelopmentRun` persists across multiple edits by the external coding agent. A new source/artifact identity starts a new `Iteration`; evidence from an older iteration must never be silently attributed to a newer one.
+
+Storage split:
+
+```text
+data/exteracontext.sqlite   → immutable corpus
+data/knowledge.sqlite      → guarded reusable knowledge overlay
+data/development.sqlite    → DevelopmentRun / Iteration / build / deploy / test state
+project repository         → declarative manifests only
+```
 
 ## Current implementation baseline
 
@@ -68,7 +109,6 @@ The closed-loop design will extend this baseline with project/task context, buil
 
 Decisions below are intentionally unresolved until they are grilled and accepted:
 
-- How a development run is represented and persisted.
 - Whether build/deploy/test operations are exposed as atomic tools, a high-level state machine, or both.
 - How projects define their build, artifact, deploy, and acceptance adapters without granting arbitrary shell authority.
 - Which failures automatically route to Knowledge, REA, device runtime, or back to the coding agent.
