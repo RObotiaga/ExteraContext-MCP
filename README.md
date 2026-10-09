@@ -1,27 +1,67 @@
 # ExteraContext MCP
 
-MCP server and mutable knowledge runtime for ExteraContext.
+MCP server, mutable knowledge runtime, and closed-loop development control plane for ExteraGram/AyuGram plugins.
 
-The immutable ExteraGram/AyuGram knowledge corpus is produced separately. This repository owns retrieval, MCP serving, guarded write-back, orchestration, compatibility queries, DeepSeek Harness integration, and the separate mutable agent-knowledge store. Ordinary operation is offline: with `EXTERACONTEXT_AUTO_SYNC` unset or `0`, retrieval does not access the network. An explicit `EXTERACONTEXT_AUTO_SYNC=1` opts into the trusted, hash-pinned updater described below; it downloads only SQLite and manifest release assets from this fixed MCP GitHub repository and never clones or executes Knowledge repository code.
+ExteraContext is **not** a standalone coding agent. An external coding agent edits and builds plugin source; ExteraContext supplies evidence-backed development context and orchestrates the validation loop around each revision. The immutable knowledge corpus is produced separately. This repository owns retrieval, MCP serving, guarded write-back, compatibility queries, development-run orchestration, and the integration boundary to a trusted real-device plugin-test backend.
+
+Ordinary knowledge operation is offline: with `EXTERACONTEXT_AUTO_SYNC` unset or `0`, retrieval does not access the network. Device/runtime tools are also local and are delegated over stdio to a reviewed, build-pinned `extera-plugin-test-mcp` runner.
 
 ## Ready-to-use local install
 
 For a new Linux installation without an existing corpus, use an independently reviewed local artifact containing the real corpus and locked runtime dependencies. After extraction, `python3 install.py --start` installs into the current user's `~/.local/share/exteracontext` and starts stdio MCP without DB/environment configuration. Repeat installs preserve the separate overlay/run directories; verified version activation supports rollback. Node >=20 and Python >=3.11 with SQLite FTS5 remain explicit OS prerequisites. See [local install, isolated build, acceptance and limitations](docs/LOCAL_INSTALL.md). This is not a public release and does not unblock remote AUTO_SYNC or bypass protected publication.
+
+The closed-loop device backend is a separate optional runtime component. Its reviewed build, default installation path, trust pin, and real-device release gate are documented in [`docs/CLOSED_LOOP_DEVICE_BACKEND.md`](docs/CLOSED_LOOP_DEVICE_BACKEND.md).
 
 ## Architecture
 
 ```text
 Installed, already-built corpus SQLite
         |
-        | offline validated copy (no rebuild)
         v
  data/exteracontext.sqlite   (deployed immutable base)
         +
  data/knowledge.sqlite       (mutable verified overlay)
         |
         v
- ExteraContext MCP 2026-07-28
+ ExteraContext MCP 2026-07-28  <---- external coding agent
+        |
+        | trusted stdio MCP boundary
+        v
+ extera-plugin-test-mcp
+        |
+        +-- ADB / DevServer / plugin lifecycle
+        +-- deterministic acceptance tests
+        +-- DevelopmentRun / Iteration
+        +-- signed EvidenceBundle
 ```
+
+A successful runtime test does not directly promote a knowledge statement. Signed runtime evidence enters the existing collector → blind verifier → comparison → SQLite promotion pipeline.
+
+## Closed-loop development path
+
+The normal path for an external coding agent is:
+
+```text
+knowledge/API/compatibility lookup
+        ↓
+development_start
+        ↓
+agent edits + builds plugin
+        ↓
+development_submit_revision
+        ↓
+development_execute_iteration
+        ↓
+ PASS ─────────→ signed EvidenceBundle ─→ optional knowledge_propose_from_test
+  │
+ FAIL/BLOCKED
+  ↓
+repair_context
+  ↓
+agent edits + builds next revision
+```
+
+The main MCP entrypoint exposes the existing knowledge tools plus 27 device/runtime/development tools through one server. The real-device backend remains a separate trust domain and is lazily spawned only when one of those delegated tools is called. See [`mcp/README.md`](mcp/README.md) for the tool list and configuration.
 
 ## Offline deployment (no collection)
 
@@ -39,7 +79,19 @@ Keep `EXTERACONTEXT_AUTO_SYNC` unset or set it to `0` for offline operation. Exp
 
 The script opens the installed source as SQLite `mode=ro&immutable=1` to avoid writing it (including WAL shared-memory files), checks integrity, required schema and nonempty docs/facts, then copies to a temporary file in the destination directory, revalidates and atomically replaces the destination. It **refuses a nonempty source WAL/SHM/journal**, since immutable reads omit uncheckpointed transactions; quiesce/checkpoint it externally before deployment. It also refuses a nonempty destination WAL/SHM/journal. Avoid concurrent writers or readers during replacement. Deployment writes `data/.knowledge-manifest.json` with SHA-256, source location, row counts and metadata; it explicitly does **not** claim verification of a git commit. The DB and manifest are each atomically replaced, not a single transaction across both files: after an interrupted deployment, compare the manifest digest to the deployed DB before use. No `.knowledge-ref` stamp is fabricated. The deployed SQLite is ignored by git (`data/*.sqlite`); do not commit it or sensitive local manifest provenance. The mutable `data/knowledge.sqlite` overlay is separate and unaffected.
 
-If MCP dependencies are already installed, run the server with `node mcp/src/index.mjs --transport stdio --modern-only`. This offline deployment does not install them.
+If MCP dependencies are already installed, run the normal closed-loop server with:
+
+```sh
+node mcp/src/index-closed-loop.mjs --transport stdio --modern-only
+```
+
+For knowledge-only operation without the device/development proxy, use:
+
+```sh
+node mcp/src/index.mjs --transport stdio --modern-only
+```
+
+This offline deployment does not install MCP dependencies.
 
 ## Protected Knowledge update workflow
 
@@ -71,8 +123,10 @@ Target-text resolution accepts exact explicitly labelled client/app/client-name 
 
 ## MCP surface
 
-The server exposes target resolution, knowledge/API/usage/recipe/evidence retrieval, compatibility checks, diagnostics, and the staged write-back protocol. MCP v0.7.0 uses MCP-issued capability tokens so DeepSeek Harness does not need to expose internal child IDs. Optional runtime actor metadata can still be stored as provenance.
+The normal server exposes target resolution, knowledge/API/usage/recipe/evidence retrieval, compatibility checks, staged write-back, plus the 27 trusted device/runtime/development tools. MCP v0.7.0 uses MCP-issued capability tokens so the host does not need to expose internal child IDs. Optional runtime actor metadata can still be stored as provenance.
+
+The runtime bridge does not weaken write-back: signed machine evidence can enter a capture workflow, but a derived knowledge statement still requires collector and blind-verifier stages. The caller-controlled `record_runtime_result` endpoint remains disabled.
 
 The MCP package version is sourced from `mcp/package.json` and reported by the handshake, `doctor`, CLI help and runtime errors. The root `VERSION` (`0.7.0-mcp`) intentionally identifies the bundled skill/repository release with its `-mcp` suffix; its numeric release tracks the MCP package version.
 
-See `mcp/README.md`, `dsh/README.md`, `SKILL.md`, `NewKnowledge.md`, and `KnowledgeStore.md`.
+See `mcp/README.md`, `docs/CLOSED_LOOP_DEVICE_BACKEND.md`, `dsh/README.md`, `SKILL.md`, `NewKnowledge.md`, and `KnowledgeStore.md`.
