@@ -18,11 +18,9 @@
     "test:wire": "node --test test/sdk-integration.test.mjs test/device-runner-wire.test.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.1.0",
     "@modelcontextprotocol/server": "2.1.0",
     "@modelcontextprotocol/node": "2.1.0",
     "zod": "4.6.5"
-  },
-  "devDependencies": {
-    "@modelcontextprotocol/client": "2.1.0"
   }
 }
