@@ -183,7 +183,7 @@ reflect_on_task
 → submit_verifier_phase_b
 ```
 
-MCP-issued collector/verifier capability tokens authorize those stages. Runtime actor identity is optional provenance, not authorization. Never write trusted rows directly to SQLite.
+MCP-issued collector/verifier capability tokens authorize those stages. Runtime actor identity is optional provenance, not authorization. Never write trusted rows directly to SQLite. Use `scripts/knowledge.py` only for low-level/debug work.
 
 Completion criterion: a reusable discovery is already represented, passed through staged verification, or explicitly left unpersisted for insufficient evidence.
 
