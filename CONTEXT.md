@@ -6,24 +6,22 @@ This document captures the current product and architecture context for the `fea
 
 ExteraContext MCP is **not** a standalone coding agent and must not become a second LLM orchestration product.
 
-It is a development tool/control plane for an external coding agent implementing ExteraGram/AyuGram plugins. Its job is to support the full development loop, from helping the agent choose and implement the correct API path through build, deployment, runtime validation, diagnosis, retry, evidence capture, and reuse of successful implementations.
+It is a development tool/control plane for an external coding agent implementing ExteraGram/AyuGram plugins. Its job is to support the full development loop, from helping the agent choose and implement the correct API path through deployment, runtime validation, diagnosis, retry, evidence capture, and reuse of successful implementations.
 
-The external coding agent remains responsible for editing source code and making implementation changes.
+The external coding agent remains responsible for editing source code and producing the plugin build submitted for validation.
 
 ## Target closed loop
 
 ```text
 issue / task
   ↓
-prepare task context
-  ↓
 project + platform knowledge
   ↓
 implementation guidance / API verification
   ↓
-external agent edits source
+external agent edits + builds source
   ↓
-build
+DevelopmentRun / Iteration
   ↓
 artifact identity + preflight
   ↓
@@ -31,138 +29,117 @@ deploy / reload
   ↓
 runtime and acceptance validation
   ↓
-PASS ───────────────→ evidence → reusable knowledge candidate
+PASS ───────────────→ signed evidence → reusable knowledge candidate
   │
  FAIL / BLOCKED
   ↓
-diagnosis
-  ├─ project knowledge
-  ├─ platform knowledge
-  ├─ logs/runtime observations
-  └─ REA when static APK inspection is needed
-  ↓
-repair context returned to the external agent
+diagnostics + repair_context
   ↓
 external agent edits source
   ↓
-build / deploy / validate again
+new Iteration
 ```
 
 ## Accepted principles
 
 1. **External agent owns source edits.** ExteraContext MCP does not host an LLM and does not independently rewrite plugin source as an autonomous agent.
-2. **ExteraContext MCP owns the development evidence loop.** It should make the path from task context to validated implementation reproducible and machine-readable.
-3. **Help while writing is part of the product.** Retrieval, API/signature resolution, recipes, compatibility checks, project constraints, and REA-assisted inspection should help the agent choose the correct implementation before runtime testing.
-4. **Runtime validation is first-class.** Build success, source inspection, and documentation are not substitutes for execution when the ticket requires device/runtime evidence.
-5. **Successful implementations become reusable knowledge.** Runtime- or acceptance-confirmed discoveries should enter the existing guarded collector/verifier knowledge pipeline rather than being trusted solely because the implementing agent reports success.
-6. **Evidence status remains explicit.** `code`, `docs`, `static-apk`, runtime observation, behavior verification, and ticket acceptance must not collapse into one generic "verified" state.
-7. **The current trusted knowledge/write-back model is preserved.** The closed loop extends the MCP; it does not weaken independent verification or machine-attestation requirements.
-8. **Development state is persisted outside the project repository.** One task/ticket maps to a `DevelopmentRun`; each source/artifact revision maps to a child `Iteration`.
-9. **Development state and reusable knowledge are separate stores.** `development.sqlite` owns transient/reproducibility state for runs, builds, deployments and tests; `knowledge.sqlite` remains the durable verified knowledge overlay.
-10. **Project repositories remain declarative.** They may contain build/test/acceptance manifests, but not device-local transient state, logs, or current-run bookkeeping.
-11. **The normal MCP path is a high-level development state machine.** The external agent should not have to manually remember build → preflight → deploy → deployed-identity verification → acceptance → evidence ordering.
-12. **Atomic primitives remain available for diagnosis and exceptional control.** They must not bypass run/iteration identity, evidence binding, authorization, or safety checks.
+2. **ExteraContext MCP owns the development evidence loop.** It makes the path from task context to validated implementation reproducible and machine-readable.
+3. **Help while writing is part of the product.** Retrieval, API/signature resolution, recipes, compatibility checks, project constraints, and static/runtime inspection should help the agent choose the correct implementation before acceptance testing.
+4. **Runtime validation is first-class.** Build success, source inspection, and documentation are not substitutes for execution when the task requires runtime evidence.
+5. **Successful implementations can become reusable knowledge.** Runtime-confirmed discoveries enter the existing guarded collector/verifier pipeline rather than becoming trusted solely because the implementing agent reports success.
+6. **Evidence status remains explicit.** Static evidence, runtime observations, behavior verification, and accepted knowledge are distinct states.
+7. **The current trusted knowledge/write-back model is preserved.** The closed loop extends the MCP; it does not bypass collector/blind-verifier or SQLite promotion guards.
+8. **Development state is persisted outside the project repository.** One task maps to a `DevelopmentRun`; each source/artifact revision maps to a child `Iteration`.
+9. **Development state and reusable knowledge are separate stores.** Device-runner `development.sqlite` owns run/iteration state; ExteraContext knowledge storage remains the durable knowledge plane.
+10. **Project repositories remain declarative.** Device-local transient state, logs, test journals, and evidence bundles are not committed as project state.
+11. **The normal path is a high-level development state machine.** The external agent should not have to manually remember preflight → install/update → reload → reset → acceptance → evidence ordering.
+12. **Atomic primitives remain available for diagnosis.** They do not authorize stale-artifact attachment or caller-asserted PASS states.
+13. **One MCP surface, isolated runtime trust domain.** The coding agent talks only to ExteraContext MCP; ExteraContext delegates device/runtime work to a separately spawned trusted `extera-plugin-test-mcp` process over stdio.
+14. **The trusted runner is build-pinned.** ExteraContext verifies `runner-build.json`, server identity/version, and the 27-tool contract before delegated calls.
+15. **Caller-provided PASS/FAIL is never runtime proof.** `test_run` owns the result; `test_collect_evidence` accepts only `test_run_id`; the signed EvidenceBundle is the canonical runtime object.
+16. **Machine evidence and knowledge promotion are different boundaries.** Attested runtime evidence can enter ExteraContext as `runtime-verified` evidence, but the statement derived from it remains a candidate until collector, blind verifier Phase A, comparison Phase B, and promotion guards succeed.
 
 ## Development state model
 
 ```text
 DevelopmentRun
-├── run_id
 ├── project identity
 ├── task / issue identity
-├── base source identity
-├── target client / SDK / platform
-├── acceptance requirements
+├── target client / device
+├── acceptance plan
 ├── status
 │
 ├── Iteration 1
-│   ├── source identity
-│   ├── build invocation + result
-│   ├── artifact identities + hashes
-│   ├── deployment identity
-│   ├── tests + assertions
-│   ├── evidence
-│   └── diagnosis / repair context
+│   ├── source commit + dirty flag
+│   ├── plugin ID/version
+│   ├── EAF SHA-256
+│   ├── lifecycle/preflight result
+│   ├── test_run_id
+│   ├── signed EvidenceBundle or diagnostics
+│   └── repair_context
 │
-├── Iteration 2
-│   └── ...
-│
-└── resulting knowledge candidates
+└── Iteration N ...
 ```
 
-`DevelopmentRun` persists across multiple edits by the external coding agent. A new source/artifact identity starts a new `Iteration`; evidence from an older iteration must never be silently attributed to a newer one.
+A new source/artifact identity starts a new `Iteration`; evidence from an older iteration must never be silently attributed to a newer one.
 
-Storage split:
+## Implemented MCP interaction model
+
+### Knowledge core
+
+The existing ExteraContext tools remain responsible for target resolution, retrieval, compatibility, provenance, and guarded knowledge capture.
+
+### Trusted device/runtime backend
+
+ExteraContext now proxies the reviewed 27-tool `extera-plugin-test-mcp` surface through an isolated stdio subprocess. The backend covers:
+
+- ADB/device and PySDK readiness;
+- plugin install/update/reload/enable/disable, logs and navigation;
+- deterministic assertions, diagnostics, `test_run` and signed evidence;
+- `DevelopmentRun` / `Iteration` orchestration;
+- runtime-backed knowledge proposals.
+
+The normal coding-agent path is:
 
 ```text
-data/exteracontext.sqlite   → immutable corpus
-data/knowledge.sqlite      → guarded reusable knowledge overlay
-data/development.sqlite    → DevelopmentRun / Iteration / build / deploy / test state
-project repository         → declarative manifests only
+development_start
+→ external agent edits/builds
+→ development_submit_revision
+→ development_execute_iteration
+   ├─ PASS → signed EvidenceBundle
+   └─ FAIL/BLOCKED → diagnostics + repair_context
+→ external agent fixes/builds
+→ next revision / iteration
 ```
 
-## MCP interaction model
-
-The MCP surface has two levels.
-
-### High-level safe path
-
-The default workflow exposed to a coding agent is stateful and ordered:
+For a reusable discovery:
 
 ```text
-prepare_task_context
-→ start_development_run
-→ submit_source_revision
-→ execute_iteration
+knowledge_propose_from_test
+→ trusted runner verifies PASS + attestation
+→ ExteraContext reflect_on_task orchestration
+→ collector
+→ blind verifier Phase A
+→ comparison Phase B
+→ promotion guards
 ```
 
-`execute_iteration` owns the standard sequence:
+The old caller-controlled `record_runtime_result` endpoint remains disabled.
 
-```text
-source identity
-→ build
-→ artifact identity
-→ artifact preflight
-→ deploy / reload
-→ deployed identity preflight
-→ acceptance tests
-→ evidence collection
-→ PASS / FAIL / BLOCKED / INFRA_ERROR
-```
+## Trust pin for the first integrated backend
 
-A failed iteration returns structured `repair_context` rather than modifying source code itself. The external agent applies the source change and submits a new source revision, which creates the next iteration.
+- reviewed archive SHA-256: `8033725591222a159e882a43e9a85d2f5ce7b13d1d6bdd24daf4177b5c3f8cf0`
+- exact archive size: `2,417,871` bytes
+- runner package/server version: `0.1.0`
+- pinned compiled SHA-256: `240ab1d6d164b1e14b04d47289c7e6e17690d84ac78b72997c7767a2c2f742cc`
 
-### Atomic diagnostic primitives
+See `docs/CLOSED_LOOP_DEVICE_BACKEND.md` and ADR-0004 for deployment and trust details.
 
-The same system also exposes narrower operations for investigation and unusual cases, for example:
+## Remaining design questions
 
-```text
-inspect_build
-inspect_artifact
-verify_artifact
-inspect_device
-inspect_runtime
-collect_logs
-collect_evidence
-rerun_test
-query_knowledge
-inspect_with_rea
-```
+The core closed-loop architecture is implemented. Remaining work is narrower and can evolve independently:
 
-Atomic operations are subordinate to the same `DevelopmentRun` / `Iteration` identity and evidence rules. They are not an escape hatch for attaching stale artifacts, unbound runtime results, or caller-asserted PASS states.
-
-## Current implementation baseline
-
-The existing MCP is primarily a knowledge/evidence plane: retrieval, provenance, compatibility queries, staged write-back, knowledge orchestration, and diagnostics. `record_runtime_result` is intentionally fail-closed without trusted machine attestation.
-
-The closed-loop design will extend this baseline with project/task context, build/artifact identity, device/runtime execution, acceptance plans, diagnostic routing, retry state, and evidence hand-off.
-
-## Open design questions
-
-Decisions below are intentionally unresolved until they are grilled and accepted:
-
-- How projects define their build, artifact, deploy, and acceptance adapters without granting arbitrary shell authority.
-- Which failures automatically route to Knowledge, REA, device runtime, or back to the coding agent.
-- How ticket acceptance requirements become executable test plans.
-- What qualifies an implementation for automatic knowledge-candidate creation.
-- Which runtime evidence must be real-device versus emulator-capable.
+- whether ExteraContext should eventually own a trusted build adapter, or continue accepting builds produced by the external coding agent;
+- when failure diagnosis should automatically invoke REA/static APK inspection rather than only returning `repair_context`;
+- which acceptance plans specifically require a physical device and which are allowed to pass on an emulator;
+- how project-specific acceptance manifests should be versioned and reviewed for broader plugin repositories.
