@@ -1,27 +1,37 @@
 ---
 name: exteracontext
-description: Evidence-aware ExteraGram/AyuGram plugin development context. Use when implementing, reviewing, debugging, porting, or researching Android plugin APIs, hooks, lifecycle, UI, requests, accounts, Java/Xposed/DEX bridges, Elyx packaging, or SDK compatibility. Reach for it before using a plugin/runtime symbol not defined in the current repository.
+description: Evidence-aware ExteraGram/AyuGram plugin development context and closed-loop runtime validation. Use when implementing, reviewing, debugging, porting, testing, or researching Android plugin APIs, hooks, lifecycle, UI, requests, accounts, Java/Xposed/DEX bridges, Elyx packaging, or SDK compatibility. Reach for it before using a plugin/runtime symbol not defined in the current repository and use the DevelopmentRun tools when real runtime acceptance is required.
 ---
 
 # ExteraContext
 
-Retrieve task-specific evidence from the bundled ExteraGram plugin-development wiki instead of relying on remembered API names.
+Use task-specific evidence from the bundled ExteraGram plugin-development knowledge base, then use the trusted runtime backend to validate the exact plugin revision when the task requires execution on a client/device.
+
+ExteraContext is not a coding agent. The external agent edits and builds source; ExteraContext supplies evidence, development-run state, runtime validation, diagnostics, and guarded knowledge capture.
 
 ## Operating loop
 
-Use this order: resolve the target → split the task into retrieval concepts → fetch a task packet for each concept → verify every load-bearing external symbol → implement/review → capture reusable new knowledge.
+Use this order:
 
-When ExteraContext MCP tools are registered, prefer them over shelling out to the CLI. In DeepSeek Harness the names are normally `mcp__exteracontext__resolve_target`, `mcp__exteracontext__search_knowledge`, `mcp__exteracontext__find_api`, and so on. The `scripts/*.py` commands documented below are the local/debug fallback and must preserve the same evidence semantics. First verify the locally deployed base DB exists: missing data must not trigger an automatic download or corpus rebuild. For offline bootstrap of an **existing** approved SQLite corpus, see [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md); its manifest hashes the deployed copy but reports `commit_verified: false`, not a verified Knowledge commit pin. Keep `EXTERACONTEXT_AUTO_SYNC=0`.
+```text
+resolve target
+→ retrieve focused project/platform evidence
+→ verify every load-bearing external symbol
+→ external agent implements/builds
+→ DevelopmentRun / Iteration validation when runtime evidence is required
+→ diagnose and repair on FAIL/BLOCKED
+→ capture reusable new knowledge through collector/blind verifier
+```
 
-Keep each retrieval query to one concept. Split independent concerns such as outgoing hooks, account routing, UI threading, and cleanup into separate queries; combine them only when the interaction between those concerns is itself the subject. Prefer a small set of focused packets over loading the whole wiki.
+When ExteraContext MCP tools are registered, prefer them over shelling out to the CLI. The `scripts/*.py` commands are local/debug fallbacks and must preserve the same evidence semantics. First verify the locally deployed base DB exists: missing data must not trigger an automatic download or corpus rebuild. Keep `EXTERACONTEXT_AUTO_SYNC=0` unless an approved deployment explicitly enables the updater.
+
+Keep each retrieval query to one concept. Split independent concerns such as outgoing hooks, account routing, UI threading, cleanup, or packaging into separate queries; combine them only when their interaction is itself the subject.
 
 ## Resolve the target
 
 Infer client, platform, client version, SDK version, and plugin format from the repository or request. Keep unknown fields unknown; do not manufacture a version.
 
 Completion criterion: the target is explicit enough that evidence from another client cannot silently masquerade as target API.
-
-If a target field cannot be established from the repository or request, keep it unknown and preserve that uncertainty in retrieval and conclusions.
 
 ## Get the task packet
 
@@ -35,8 +45,6 @@ Treat the packet as retrieval, not authority. Prefer `runtime-verified`, then ta
 
 If a concept has no direct target evidence, stop treating it as resolved. Record the gap or narrow the claim instead of repeatedly broadening the search until donor evidence looks authoritative.
 
-Completion criterion: you have either direct ExteraGram evidence for the approach or an explicit gap saying direct evidence is absent.
-
 ## Resolve every non-local symbol
 
 Before writing a nontrivial ExteraGram/AyuGram runtime symbol that is not defined in the working repository, call MCP `find_api`. For provenance, call `get_evidence`. CLI fallback:
@@ -48,7 +56,7 @@ python scripts/query.py evidence "<fact-id-or-symbol>"
 
 Use the exact signature/module/version supported by the evidence. A donor implementation may suggest architecture, but its symbol becomes usable only after target-client evidence is found.
 
-Completion criterion: every load-bearing external symbol in the implementation is either evidenced for the target or called out as an unresolved compatibility assumption.
+Completion criterion: every load-bearing external symbol is either evidenced for the target or explicitly marked as an unresolved compatibility assumption.
 
 ## Reach for recipes only on that branch
 
@@ -58,36 +66,136 @@ For implementation patterns such as lifecycle cleanup, accounts, UI threading, D
 python scripts/query.py recipe "<pattern>"
 ```
 
-Do not load the whole wiki unless retrieval is insufficient. The full derived knowledge base lives under `data/wiki/`; `rules.md`, `compatibility.md`, and `gaps.md` are the first manual fallbacks.
+Do not load the whole wiki unless focused retrieval is insufficient.
+
+## Use the closed-loop runtime path
+
+When a task requires actual client/device behavior, do not stop at build success or source inspection. Prefer the high-level development tools over manually sequencing lifecycle calls.
+
+Start one persistent run per task/issue:
+
+```text
+development_start
+```
+
+The run binds project/task identity, target device/client, and an acceptance plan. After the external agent edits and builds the plugin, submit the exact EAF/source revision:
+
+```text
+development_submit_revision
+```
+
+This creates the next `Iteration` and binds commit/dirty state plus artifact identity. Then execute the standard validation path:
+
+```text
+development_execute_iteration
+```
+
+The runner owns the ordering:
+
+```text
+preflight
+→ artifact/install/update checks
+→ enable/reload
+→ reset state
+→ acceptance test
+→ signed evidence on PASS
+   or diagnostics + repair_context on failure
+```
+
+Treat results distinctly:
+
+- `PASS`: the exact tested revision satisfied the acceptance plan.
+- `FAIL`: the correct revision ran in a usable environment but behavior/assertions failed.
+- `BLOCKED`: environment/artifact/lifecycle conditions prevented a valid functional test.
+- `INFRA_ERROR`: the test infrastructure itself failed.
+
+On `FAIL` or `BLOCKED`, use the returned diagnostics/`repair_context`, change source externally, build again, call `development_submit_revision`, and execute the new iteration. Never attach evidence from an older iteration to a newer revision.
+
+Use atomic tools such as `plugin_doctor`, `plugin_get_logs`, `plugin_get_diagnostics`, `plugin_capture_screen`, lifecycle controls, navigation, and assertions when investigating an unusual failure. They are diagnostic primitives, not a way to bypass run/iteration identity.
+
+## Runtime evidence boundary
+
+Caller-provided PASS/FAIL is never runtime evidence. The trusted path is:
+
+```text
+test_run
+→ runner-owned test_run_id
+→ test_collect_evidence(test_run_id)
+→ signed EvidenceBundle
+```
+
+The device runner is a separately spawned, build-pinned trust domain. ExteraContext verifies the reviewed runner build/tool contract before delegating device calls. The runner owns its machine-attestation secret; the coding agent must not receive it.
+
+The public `record_runtime_result` endpoint remains intentionally fail-closed because its result is caller-controlled. Do not use it as a substitute for the signed EvidenceBundle path.
+
+A signed EvidenceBundle may enter ExteraContext as `runtime-verified` machine evidence. This does **not** automatically make every statement derived from it verified knowledge. Scope the claim to what the test actually demonstrated.
 
 ## Preserve evidence status
 
 Keep these meanings distinct in conclusions and code review:
 
-- `runtime-verified`: executed on a named build/device.
+- `runtime-verified`: executed evidence produced by the trusted runtime path for a named target/build.
 - `code`: found in a specific source snapshot.
 - `docs`: documented, not runtime-proven.
 - `inference`: synthesis from evidence.
 - `secondary`: community/radar claim.
 - `unavailable`: source could not be acquired.
 
-Successful build, source inspection, or README text does not become runtime verification. MCP `record_runtime_result` currently fails closed without trusted machine attestation; never send a user/model-provided PASS as device evidence. The machine-only CLI path is explicitly gated; attestation secrets can be supplied over stdin to avoid argv exposure. See [`KnowledgeStore.md`](KnowledgeStore.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
+Successful build, source inspection, README text, or an agent's opinion does not become runtime verification.
 
-Legacy wiki facts may also carry collector/reviewer provenance from the original 2026-09-27 build. Treat that as `independent-source-reread-nonblind`: the reviewer was a separate fresh run and re-read primary material, but could see/edit the collector output. This strengthens auditability but does not upgrade `docs`/`code` to runtime evidence and is not equivalent to the blind Phase-A verifier used for new write-back.
+Legacy wiki facts may also carry collector/reviewer provenance from the original 2026-09-27 build. Treat that as `independent-source-reread-nonblind`: useful auditability, but not equivalent to the blind Phase-A verifier used for new write-back and not an upgrade from `docs`/`code` to runtime evidence.
 
-## Capture new knowledge
+## Capture reusable runtime knowledge
 
-When development, source inspection, build results, or runtime testing reveals reusable information that is absent from ExteraContext, or materially confirms/contradicts an existing claim, follow [`NewKnowledge.md`](NewKnowledge.md).
+If a PASS iteration reveals reusable information that is absent from ExteraContext or materially confirms/contradicts an existing claim, prefer:
 
-The main agent must not promote its own discovery directly into trusted knowledge. Dispatch a cheap collector subagent to produce a scoped candidate from the original evidence, then dispatch an independent verifier subagent. The verifier must first form its own extraction from the original evidence **without seeing the candidate**, then receive the candidate and compare it against that fixed extraction. Write or attach the knowledge only after the verifier returns `accept`, `accept-with-changes`, `attach-evidence`, `conflict`, or `needs-runtime` according to that protocol.
+```text
+knowledge_propose_from_test
+```
 
-Completion criterion: any reusable discovery made during the task is either already represented in ExteraContext, passed through the two-subagent protocol, or explicitly left unpersisted because it lacks reusable evidence.
+This asks the trusted runner to re-validate the PASS run/evidence attestation and then starts the normal ExteraContext capture workflow. It does not directly promote the claim.
 
-When native subagents are available, use a cheap fresh collector and a separate verifier. The non-negotiable blind boundary is that Phase A is persisted before the candidate is disclosed. Prefer a continuable verifier when the host exposes one, but do not invent provider/child IDs when it does not. MCP-issued collector/verifier capability tokens authorize the staged write path; real runtime child identity is optional provenance. See [`dsh/README.md`](dsh/README.md).
+The required promotion path remains:
 
+```text
+trusted runtime evidence
+→ reflect_on_task
+→ collector
+→ blind verifier Phase A
+→ verifier comparison Phase B
+→ SQLite promotion guards
+```
 
-Prefer the MCP staged write path when it is available: `reflect_on_task` → `submit_collector_result` → `submit_verifier_phase_a` → `submit_verifier_phase_b`. It delegates to the same orchestrator and SQLite guards. Otherwise use `scripts/orchestrate.py`; use `scripts/knowledge.py` only as the low-level/debug interface. See [`KnowledgeStore.md`](KnowledgeStore.md) for the storage contract. Never write trusted rows directly to SQLite. The database itself rejects promotion to `verified` without an independent verifier record. Ordinary `query.py` retrieval includes `verified` and explicitly `conflicting` agent knowledge, while candidates/rejected/superseded records remain out of the normal result set.
+A narrow test must produce a narrow claim. For example, one tested hook/client/version combination is not evidence that the same hook works across all versions or clients.
+
+## Capture other new knowledge
+
+When development, source inspection, or research reveals reusable information without a trusted runtime run, follow [`NewKnowledge.md`](NewKnowledge.md).
+
+The main agent must not promote its own discovery directly into trusted knowledge. Dispatch a collector to produce a scoped candidate from original evidence, then an independent verifier. The verifier first forms its own extraction from the original evidence **without seeing the candidate**, persists Phase A, and only then receives the candidate for Phase B comparison.
+
+Prefer the MCP staged write path:
+
+```text
+reflect_on_task
+→ submit_collector_result
+→ submit_verifier_phase_a
+→ submit_verifier_phase_b
+```
+
+MCP-issued collector/verifier capability tokens authorize those stages. Runtime actor identity is optional provenance, not authorization. Never write trusted rows directly to SQLite.
+
+Completion criterion: a reusable discovery is either already represented in ExteraContext, passed through the staged protocol, or explicitly left unpersisted because it lacks sufficient reusable evidence.
 
 ## Finish
 
-Before presenting or committing an implementation, check that target-client evidence supports its critical API path, lifecycle cleanup is accounted for, account/thread boundaries are explicit where relevant, and any version uncertainty is stated rather than hidden.
+Before presenting or committing an implementation, check that:
+
+- target-client evidence supports the critical API path;
+- lifecycle cleanup and account/thread boundaries are explicit where relevant;
+- version uncertainty is stated rather than hidden;
+- tasks requiring runtime behavior have an appropriate `DevelopmentRun` acceptance result;
+- the tested source/artifact identity matches the revision being claimed;
+- reusable discoveries are either captured through the guarded pipeline or intentionally left unpersisted.
+
+See [`docs/CLOSED_LOOP_DEVICE_BACKEND.md`](docs/CLOSED_LOOP_DEVICE_BACKEND.md), [`KnowledgeStore.md`](KnowledgeStore.md), [`NewKnowledge.md`](NewKnowledge.md), and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) for the trust/storage/deployment contracts.
